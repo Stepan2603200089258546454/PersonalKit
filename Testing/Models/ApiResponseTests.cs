@@ -77,4 +77,38 @@ public sealed class ApiResponseTests
         Assert.True(exception.Message.Length < 5000);
         Assert.Contains(new string('x', 100), exception.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void EnsureSuccess_EmptyBody_MessageHasNoTrailingNewLine()
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        var result = new ApiResponse<string>(HttpStatusCode.InternalServerError, response.Headers, null, string.Empty);
+
+        var exception = Assert.Throws<HttpRequestException>(() => result.EnsureSuccess());
+
+        Assert.DoesNotContain(Environment.NewLine, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnsureSuccess_Redirect_Throws()
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.Redirect);
+        var result = new ApiResponse<string>(HttpStatusCode.Redirect, response.Headers, null, null);
+
+        var exception = Assert.Throws<HttpRequestException>(() => result.EnsureSuccess());
+
+        Assert.Equal(HttpStatusCode.Redirect, exception.StatusCode);
+    }
+
+    [Fact]
+    public void EnsureSuccess_TruncatesBodyTo2048Characters()
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.BadGateway);
+        var body = new string('x', 5000);
+        var result = new ApiResponse<string>(HttpStatusCode.BadGateway, response.Headers, null, body);
+
+        var exception = Assert.Throws<HttpRequestException>(() => result.EnsureSuccess());
+
+        Assert.Equal(2048, exception.Message.Count(character => character == 'x'));
+    }
 }

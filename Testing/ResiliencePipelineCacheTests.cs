@@ -105,4 +105,55 @@ public sealed class ResiliencePipelineCacheTests
             response.Dispose();
         }
     }
+
+    [Fact]
+    public void NoRetryMode_DoesNotRetry()
+    {
+        var cache = new ResiliencePipelineCache();
+        var pipeline = cache.GetPipeline("client", TestOptions.Fast(), allowRetry: false);
+        var calls = 0;
+
+        using var response = pipeline.Execute(() =>
+        {
+            calls++;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError);
+        });
+
+        Assert.Equal(1, calls);
+        Assert.Equal(System.Net.HttpStatusCode.InternalServerError, response.StatusCode);
+    }
+
+    [Fact]
+    public void NoRetryEntry_IsRebuiltForNewOptions()
+    {
+        var cache = new ResiliencePipelineCache();
+        var firstOptions = TestOptions.Fast();
+        var secondOptions = TestOptions.Fast();
+
+        var first = cache.GetPipeline("client", firstOptions, allowRetry: false);
+        var second = cache.GetPipeline("client", secondOptions, allowRetry: false);
+        var repeated = cache.GetPipeline("client", secondOptions, allowRetry: false);
+
+        Assert.NotSame(first, second);
+        Assert.Same(second, repeated);
+    }
+
+    [Fact]
+    public void RetryAndNoRetryModes_AreReloadedIndependently()
+    {
+        var cache = new ResiliencePipelineCache();
+        var options = TestOptions.Fast();
+
+        var withRetry = cache.GetPipeline("client", options, allowRetry: true);
+        var withoutRetry = cache.GetPipeline("client", options, allowRetry: false);
+
+        var reloaded = TestOptions.Fast();
+        var withRetryAfterReload = cache.GetPipeline("client", reloaded, allowRetry: true);
+        var withoutRetryAfterReload = cache.GetPipeline("client", reloaded, allowRetry: false);
+
+        Assert.NotSame(withRetry, withRetryAfterReload);
+        Assert.NotSame(withoutRetry, withoutRetryAfterReload);
+        Assert.Same(withRetryAfterReload, cache.GetPipeline("client", reloaded, allowRetry: true));
+        Assert.Same(withoutRetryAfterReload, cache.GetPipeline("client", reloaded, allowRetry: false));
+    }
 }

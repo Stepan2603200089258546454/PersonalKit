@@ -2,6 +2,7 @@ using System;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Polly;
 
@@ -20,14 +21,19 @@ internal sealed class ResilientHandlerHarness : IDisposable
         RecordingHttpMessageHandler inner,
         TestOptionsMonitor<ResilientHttpClientOptions>? monitor = null,
         ResiliencePipelineCache? cache = null,
-        string clientName = "test-client")
+        string clientName = "test-client",
+        ILoggerFactory? loggerFactory = null)
     {
         Inner = inner;
         Monitor = monitor ?? new TestOptionsMonitor<ResilientHttpClientOptions>(options);
-        Cache = cache ?? new ResiliencePipelineCache();
+        Cache = cache ?? new ResiliencePipelineCache(loggerFactory);
         ClientName = clientName;
 
-        var handler = new ResilientHttpMessageHandler(ClientName, Monitor, Cache, NullLoggerFactory.Instance)
+        var handler = new ResilientHttpMessageHandler(
+            ClientName,
+            Monitor,
+            Cache,
+            loggerFactory ?? NullLoggerFactory.Instance)
         {
             InnerHandler = inner,
         };

@@ -12,10 +12,11 @@ namespace Common.Helper.Http;
 
 /// <summary>
 /// Собирает конвейер устойчивости по параметрам клиента.
+/// Стратегии добавляются в порядке «снаружи внутрь»: повтор → предохранитель → таймаут попытки.
 /// </summary>
 internal static class ResiliencePipelineFactory
 {
-    private static readonly int[] DefaultTransientStatusCodes = [408, 429, 500, 502, 503, 504];
+    private static readonly HashSet<int> DefaultTransientStatusCodes = [408, 429, 500, 502, 503, 504];
 
     public static ResiliencePipeline<HttpResponseMessage> Create(
         ResilientHttpClientOptions options,
@@ -25,22 +26,22 @@ internal static class ResiliencePipelineFactory
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var builder = new ResiliencePipelineBuilder<HttpResponseMessage>();
         var resilience = options.Resilience;
-
         if (resilience is null || !resilience.Enabled)
         {
-            return builder.Build();
+            return ResiliencePipeline<HttpResponseMessage>.Empty;
         }
+
+        var builder = new ResiliencePipelineBuilder<HttpResponseMessage>();
 
         if (allowRetry && resilience.Retry is { Enabled: true, MaxRetryAttempts: > 0 } retry)
         {
             builder.AddRetry(CreateRetryOptions(retry, clientName, logger));
         }
 
-        if (resilience.CircuitBreaker is { Enabled: true })
+        if (resilience.CircuitBreaker is { Enabled: true } circuitBreaker)
         {
-            builder.AddCircuitBreaker(CreateCircuitBreakerOptions(resilience.CircuitBreaker, clientName, logger));
+            builder.AddCircuitBreaker(CreateCircuitBreakerOptions(circuitBreaker, clientName, logger));
         }
 
         if (resilience.AttemptTimeout is { Enabled: true } attemptTimeout && attemptTimeout.Timeout > TimeSpan.Zero)
@@ -62,30 +63,35 @@ internal static class ResiliencePipelineFactory
         return builder.Build();
     }
 
-    private static HttpRetryStrategyOptions CreateRetryOptions(
+    internal static HttpRetryStrategyOptions CreateRetryOptions(
         RetryOptions retry,
         string clientName,
-        ILogger? logger)
+        ILogger? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(retry);
+
         var statusCodes = GetStatusCodes(retry.RetryStatusCodes);
 
         return new HttpRetryStrategyOptions
         {
             MaxRetryAttempts = retry.MaxRetryAttempts,
             Delay = retry.Delay,
-            MaxDelay = retry.MaxDelay,
+
+            // Ноль означает «без верхней границы»: Polly понимает это как null.
+            MaxDelay = retry.MaxDelay > TimeSpan.Zero ? retry.MaxDelay : null,
             BackoffType = retry.BackoffType,
             UseJitter = retry.UseJitter,
-            ShouldHandle = args => ValueTask.FromResult(ShouldRetry(args.Outcome, statusCodes)),
+            ShouldHandle = args => ValueTask.FromResult(ShouldHandleOutcome(args.Outcome, statusCodes)),
             OnRetry = args =>
             {
                 // Неуспешный ответ выбрасывается: следующей попытке нужен новый экземпляр.
                 args.Outcome.Result?.Dispose();
 
                 logger?.LogWarning(
-                    "HTTP client '{ClientName}': повтор {AttemptNumber} после {Outcome}.",
+                    "HTTP client '{ClientName}': повтор {AttemptNumber} через {RetryDelay} после {Outcome}.",
                     clientName,
                     args.AttemptNumber,
+                    args.RetryDelay,
                     args.Outcome.Exception?.Message ?? (object?)args.Outcome.Result?.StatusCode);
 
                 return default;
@@ -93,11 +99,13 @@ internal static class ResiliencePipelineFactory
         };
     }
 
-    private static HttpCircuitBreakerStrategyOptions CreateCircuitBreakerOptions(
+    internal static HttpCircuitBreakerStrategyOptions CreateCircuitBreakerOptions(
         CircuitBreakerOptions circuitBreaker,
         string clientName,
-        ILogger? logger)
+        ILogger? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(circuitBreaker);
+
         var statusCodes = GetStatusCodes(circuitBreaker.BreakStatusCodes);
 
         return new HttpCircuitBreakerStrategyOptions
@@ -106,10 +114,13 @@ internal static class ResiliencePipelineFactory
             MinimumThroughput = circuitBreaker.MinimumThroughput,
             SamplingDuration = circuitBreaker.SamplingDuration,
             BreakDuration = circuitBreaker.BreakDuration,
-            ShouldHandle = args => ValueTask.FromResult(ShouldRetry(args.Outcome, statusCodes)),
-            OnOpened = _ =>
+            ShouldHandle = args => ValueTask.FromResult(ShouldHandleOutcome(args.Outcome, statusCodes)),
+            OnOpened = args =>
             {
-                logger?.LogError("HTTP client '{ClientName}': предохранитель разомкнут.", clientName);
+                logger?.LogError(
+                    "HTTP client '{ClientName}': предохранитель разомкнут на {BreakDuration}.",
+                    clientName,
+                    args.BreakDuration);
                 return default;
             },
             OnClosed = _ =>
@@ -120,17 +131,15 @@ internal static class ResiliencePipelineFactory
         };
     }
 
-    private static HashSet<int> GetStatusCodes(int[]? configuredStatusCodes)
-    {
-        var source = configuredStatusCodes is { Length: > 0 }
-            ? configuredStatusCodes
+    private static IReadOnlySet<int> GetStatusCodes(int[]? configuredStatusCodes) =>
+        configuredStatusCodes is { Length: > 0 }
+            ? configuredStatusCodes.ToHashSet()
             : DefaultTransientStatusCodes;
 
-        return source.ToHashSet();
-    }
-
-    private static bool ShouldRetry(Outcome<HttpResponseMessage> outcome, HashSet<int> statusCodes)
+    private static bool ShouldHandleOutcome(Outcome<HttpResponseMessage> outcome, IReadOnlySet<int> statusCodes)
     {
+        // Сетевые ошибки и таймаут попытки имеют смысл повторять: запрос до сервера не дошёл
+        // либо ответ не был получен.
         if (outcome.Exception is HttpRequestException or TimeoutRejectedException)
         {
             return true;

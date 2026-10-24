@@ -31,6 +31,7 @@ public sealed class AppSettingsExampleTests
         Assert.True(options.Resilience.Retry.UseJitter);
         Assert.NotNull(options.Resilience.Retry.RetryStatusCodes);
         Assert.Equal([408, 429, 500, 502, 503, 504], options.Resilience.Retry.RetryStatusCodes);
+        Assert.False(options.Resilience.Retry.RetryNonIdempotentMethods);
 
         Assert.True(options.Resilience.CircuitBreaker.Enabled);
         Assert.Equal(0.5, options.Resilience.CircuitBreaker.FailureRatio);
@@ -67,6 +68,7 @@ public sealed class AppSettingsExampleTests
         Assert.Equal(3, options.Resilience.Retry.MaxRetryAttempts);
         Assert.Equal(DelayBackoffType.Exponential, options.Resilience.Retry.BackoffType);
         Assert.True(options.Resilience.Retry.UseJitter);
+        Assert.False(options.Resilience.Retry.RetryNonIdempotentMethods);
         Assert.True(options.Resilience.CircuitBreaker.Enabled);
         Assert.True(options.Resilience.AttemptTimeout.Enabled);
         Assert.Equal(TimeSpan.FromSeconds(10), options.Resilience.AttemptTimeout.Timeout);

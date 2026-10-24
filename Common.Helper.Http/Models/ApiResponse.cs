@@ -27,7 +27,7 @@ public sealed class ApiResponse<T>
     public HttpStatusCode StatusCode { get; }
 
     /// <summary>Признак успешного ответа: код в диапазоне 200–299.</summary>
-    public bool IsSuccessStatusCode => (int)StatusCode is >= 200 and <= 299;
+    public bool IsSuccessStatusCode => HttpStatus.IsSuccess(StatusCode);
 
     /// <summary>Заголовки ответа.</summary>
     public HttpResponseHeaders Headers { get; }
@@ -54,9 +54,12 @@ public sealed class ApiResponse<T>
             ? RawContent[..Math.Min(RawContent.Length, 2048)]
             : null;
 
-        throw new HttpRequestException(
-            $"HTTP-запрос завершился с кодом {(int)StatusCode} ({StatusCode}).{Environment.NewLine}{body}",
-            inner: null,
-            StatusCode);
+        var message = $"HTTP-запрос завершился с кодом {(int)StatusCode} ({StatusCode}).";
+        if (body is not null)
+        {
+            message += Environment.NewLine + body;
+        }
+
+        throw new HttpRequestException(message, inner: null, StatusCode);
     }
 }

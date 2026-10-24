@@ -19,6 +19,7 @@ public sealed class ResilientHttpClientOptions
     /// <summary>
     /// Общий таймаут запроса, включая все повторы.
     /// <see cref="TimeSpan.Zero"/> отключает ограничение. По умолчанию 30 секунд.
+    /// Максимум — около 49 суток (ограничение <see cref="System.Threading.CancellationTokenSource"/>).
     /// </summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 

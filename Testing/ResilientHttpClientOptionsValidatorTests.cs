@@ -323,4 +323,214 @@ public sealed class ResilientHttpClientOptionsValidatorTests
         Assert.True(result.Failed);
         Assert.Contains(result.Failures!, message => message.Contains("ResilientHttpClient", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void TimeoutAboveCancellationTokenLimit_Fails()
+    {
+        var options = TestOptions.Fast(o => o.Timeout = ResilienceLimits.MaxTotalTimeout + TimeSpan.FromDays(1));
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, message => message.Contains("Timeout", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TimeoutAtCancellationTokenLimit_Passes()
+    {
+        var options = TestOptions.Fast(o => o.Timeout = ResilienceLimits.MaxTotalTimeout);
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded, result.FailureMessage);
+    }
+
+    [Fact]
+    public void RetryDelayAboveOneDay_Fails()
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.Retry.Delay = TimeSpan.FromDays(2);
+            o.Resilience.Retry.MaxDelay = TimeSpan.FromDays(2);
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, message => message.Contains("Delay", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MaxDelayAboveOneDay_Fails()
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.Retry.Delay = TimeSpan.FromSeconds(1);
+            o.Resilience.Retry.MaxDelay = TimeSpan.FromDays(2);
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, message => message.Contains("MaxDelay", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ZeroMaxDelay_MeansNoCap_AndPasses()
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.Retry.Delay = TimeSpan.FromSeconds(1);
+            o.Resilience.Retry.MaxDelay = TimeSpan.Zero;
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded, result.FailureMessage);
+    }
+
+    [Fact]
+    public void FailureRatioNaN_Fails()
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.CircuitBreaker.Enabled = true;
+            o.Resilience.CircuitBreaker.FailureRatio = double.NaN;
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, message => message.Contains("FailureRatio", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MinimumThroughputBelowTwo_Fails()
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.CircuitBreaker.Enabled = true;
+            o.Resilience.CircuitBreaker.MinimumThroughput = 1;
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, message => message.Contains("MinimumThroughput", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(499)]
+    [InlineData(86400001)]
+    public void SamplingDurationOutsidePollyRange_Fails(int milliseconds)
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.CircuitBreaker.Enabled = true;
+            o.Resilience.CircuitBreaker.SamplingDuration = TimeSpan.FromMilliseconds(milliseconds);
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, message => message.Contains("SamplingDuration", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(499)]
+    [InlineData(86400001)]
+    public void BreakDurationOutsidePollyRange_Fails(int milliseconds)
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.CircuitBreaker.Enabled = true;
+            o.Resilience.CircuitBreaker.BreakDuration = TimeSpan.FromMilliseconds(milliseconds);
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, message => message.Contains("BreakDuration", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CircuitBreakerAtPollyBoundaries_Passes()
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.CircuitBreaker.Enabled = true;
+            o.Resilience.CircuitBreaker.FailureRatio = 1;
+            o.Resilience.CircuitBreaker.MinimumThroughput = 2;
+            o.Resilience.CircuitBreaker.SamplingDuration = TimeSpan.FromMilliseconds(500);
+            o.Resilience.CircuitBreaker.BreakDuration = TimeSpan.FromDays(1);
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded, result.FailureMessage);
+    }
+
+    [Theory]
+    [InlineData(9)]
+    [InlineData(86400001)]
+    public void AttemptTimeoutOutsidePollyRange_Fails(int milliseconds)
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.AttemptTimeout.Enabled = true;
+            o.Resilience.AttemptTimeout.Timeout = TimeSpan.FromMilliseconds(milliseconds);
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, message => message.Contains("AttemptTimeout", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(10)]
+    [InlineData(86400000)]
+    public void AttemptTimeoutAtPollyBoundaries_Passes(int milliseconds)
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.AttemptTimeout.Enabled = true;
+            o.Resilience.AttemptTimeout.Timeout = TimeSpan.FromMilliseconds(milliseconds);
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded, result.FailureMessage);
+    }
+
+    [Fact]
+    public void DisabledCircuitBreaker_SkipsValidation()
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.CircuitBreaker.Enabled = false;
+            o.Resilience.CircuitBreaker.FailureRatio = 2;
+            o.Resilience.CircuitBreaker.MinimumThroughput = 0;
+            o.Resilience.CircuitBreaker.SamplingDuration = TimeSpan.Zero;
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded, result.FailureMessage);
+    }
+
+    [Fact]
+    public void DisabledResilience_SkipsNestedValidation()
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.Enabled = false;
+            o.Resilience.Retry.MaxRetryAttempts = -1;
+            o.Resilience.Retry.Delay = TimeSpan.FromSeconds(-1);
+        });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded, result.FailureMessage);
+    }
 }

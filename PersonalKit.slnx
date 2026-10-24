@@ -1,4 +1,4 @@
-<Solution>
+﻿<Solution>
   <Folder Name="/Common/">
     <Project Path="Common.Helper.Http/Common.Helper.Http.csproj" />
   </Folder>
@@ -6,6 +6,8 @@
     <Project Path="Testing/Common.Helper.Http.Tests.csproj" />
   </Folder>
   <Folder Name="/Элементы решения/">
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
     <File Path="AGENTS.md" />
     <File Path="Directory.Build.props" />
     <File Path="Directory.Packages.props" />

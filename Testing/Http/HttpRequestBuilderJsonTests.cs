@@ -172,6 +172,105 @@ public sealed class HttpRequestBuilderJsonTests
             builder.WithJsonContent(new ItemDto(), (System.Text.Json.Serialization.Metadata.JsonTypeInfo<ItemDto>)null!));
     }
 
+    [Fact]
+    public async Task SendJsonAsync_MalformedErrorBody_ReturnsEmptyContentWithRawText()
+    {
+        var handler = JsonHandler(HttpStatusCode.InternalServerError, "<html>server error</html>");
+        using var client = CreateClient(handler);
+
+        var response = await client.NewRequest("api/items").SendJsonAsync<ItemDto>();
+
+        Assert.False(response.IsSuccessStatusCode);
+        Assert.Null(response.Content);
+        Assert.Equal("<html>server error</html>", response.RawContent);
+    }
+
+    [Fact]
+    public async Task EnsureSuccess_OnMalformedErrorBody_IncludesRawBody()
+    {
+        var handler = JsonHandler(HttpStatusCode.InternalServerError, "<html>server error</html>");
+        using var client = CreateClient(handler);
+
+        var response = await client.NewRequest("api/items").SendJsonAsync<ItemDto>();
+
+        var exception = Assert.Throws<HttpRequestException>(() => response.EnsureSuccess());
+        Assert.Equal(HttpStatusCode.InternalServerError, exception.StatusCode);
+        Assert.Contains("server error", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SendJsonAsync_MalformedErrorBody_WithJsonTypeInfo_ReturnsEmptyContent()
+    {
+        var handler = JsonHandler(HttpStatusCode.BadGateway, "not a json");
+        using var client = CreateClient(handler);
+
+        var response = await client.NewRequest("api/items")
+            .SendJsonAsync(TestJsonContext.Default.ItemDto);
+
+        Assert.False(response.IsSuccessStatusCode);
+        Assert.Null(response.Content);
+        Assert.Equal("not a json", response.RawContent);
+    }
+
+    [Fact]
+    public async Task SendJsonAsync_MalformedSuccessBody_WithJsonTypeInfo_ThrowsJsonException()
+    {
+        var handler = JsonHandler(HttpStatusCode.OK, "not a json");
+        using var client = CreateClient(handler);
+
+        await Assert.ThrowsAsync<JsonException>(() =>
+            client.NewRequest("api/items").SendJsonAsync(TestJsonContext.Default.ItemDto));
+    }
+
+    [Fact]
+    public async Task SendJsonAsync_JsonNullLiteral_ReturnsNullContent()
+    {
+        var handler = JsonHandler(HttpStatusCode.OK, "null");
+        using var client = CreateClient(handler);
+
+        var response = await client.NewRequest("api/items").SendJsonAsync<ItemDto>();
+
+        Assert.True(response.IsSuccessStatusCode);
+        Assert.Null(response.Content);
+        Assert.Equal("null", response.RawContent);
+    }
+
+    [Fact]
+    public async Task SendJsonAsync_WhitespaceBody_ReturnsDefaultContent()
+    {
+        var handler = JsonHandler(HttpStatusCode.OK, "   ");
+        using var client = CreateClient(handler);
+
+        var response = await client.NewRequest("api/items").SendJsonAsync<ItemDto>();
+
+        Assert.Null(response.Content);
+        Assert.Equal("   ", response.RawContent);
+    }
+
+    [Fact]
+    public async Task SendJsonAsync_NoContent_ReturnsNullContent()
+    {
+        var handler = JsonHandler(HttpStatusCode.NotFound, string.Empty);
+        using var client = CreateClient(handler);
+
+        var response = await client.NewRequest("api/items/404").SendJsonAsync<ProblemDto>();
+
+        Assert.False(response.IsSuccessStatusCode);
+        Assert.Null(response.Content);
+        Assert.True(string.IsNullOrEmpty(response.RawContent));
+    }
+
+    [Fact]
+    public async Task SendJsonAsync_CyrillicBody_IsDecodedAsUtf8()
+    {
+        var handler = JsonHandler(HttpStatusCode.OK, """{"name":"привет"}""");
+        using var client = CreateClient(handler);
+
+        var response = await client.NewRequest("api/items").SendJsonAsync<ItemDto>();
+
+        Assert.Equal("привет", response.Content!.Name);
+    }
+
     private static RecordingHttpMessageHandler JsonHandler(
         HttpStatusCode statusCode,
         string json,

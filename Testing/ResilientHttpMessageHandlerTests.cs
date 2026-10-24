@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -6,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Common.Helper.Http.Tests.Infrastructure;
+using Microsoft.Extensions.Logging;
 using Polly.CircuitBreaker;
 
 namespace Common.Helper.Http.Tests;
@@ -480,6 +483,20 @@ public sealed class ResilientHttpMessageHandlerTests
         using var response = await harness.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("custom-key", inner.Requests[0].OptionKeys);
+    }
+
+    [Fact]
+    public async Task NullDefaultHeaders_DoesNotBreakRequest()
+    {
+        var options = TestOptions.Fast();
+        options.DefaultHeaders = null!;
+
+        using var harness = new ResilientHandlerHarness(options, RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+
+        using var response = await harness.SendAsync("api/items");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
@@ -547,6 +564,308 @@ public sealed class ResilientHttpMessageHandlerTests
 
         Assert.Equal("https://example.test/api/items", harness.Inner.Requests[0].RequestUri!.ToString());
         Assert.Equal(["yes"], harness.Inner.Requests[0].Headers["X-Still"]);
+    }
+
+    [Fact]
+    public async Task NoRetry_ReusesOriginalContentWithoutBuffering()
+    {
+        using var harness = new ResilientHandlerHarness(TestOptions.Fast(), RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+        using var content = new StringContent("{\"name\":\"value\"}", Encoding.UTF8, "application/json");
+
+        using var response = await harness.SendAsync("api/items", HttpMethod.Post, content);
+
+        Assert.Same(content, harness.Inner.Requests[0].Content);
+    }
+
+    [Fact]
+    public async Task Retry_BuffersContentSoItCanBeReplayed()
+    {
+        var options = TestOptions.Fast(o => o.Resilience.Retry.RetryNonIdempotentMethods = true);
+        using var harness = new ResilientHandlerHarness(
+            options,
+            RecordingHttpMessageHandler.Sequence(HttpStatusCode.InternalServerError, HttpStatusCode.OK));
+        using var content = new StringContent("{\"name\":\"value\"}", Encoding.UTF8, "application/json");
+
+        using var response = await harness.SendAsync("api/items", HttpMethod.Post, content);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(2, harness.Inner.CallCount);
+        Assert.IsType<ByteArrayContent>(harness.Inner.Requests[0].Content);
+        Assert.NotSame(harness.Inner.Requests[0].Content, harness.Inner.Requests[1].Content);
+        Assert.Equal("{\"name\":\"value\"}", harness.Inner.Requests[0].BodyText);
+        Assert.Equal("{\"name\":\"value\"}", harness.Inner.Requests[1].BodyText);
+    }
+
+    [Fact]
+    public async Task NoRetry_StreamContentIsPassedAsIs()
+    {
+        using var harness = new ResilientHandlerHarness(TestOptions.Fast(), RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes("stream-data"));
+        using var content = new StreamContent(stream);
+
+        using var response = await harness.SendAsync("api/upload", HttpMethod.Post, content);
+
+        Assert.Same(content, harness.Inner.Requests[0].Content);
+        Assert.Equal("stream-data", harness.Inner.Requests[0].BodyText);
+    }
+
+    [Fact]
+    public async Task DefaultHeaders_ContentHeaderIsAppliedToContent()
+    {
+        var options = TestOptions.Fast(o => o.DefaultHeaders["Content-Type"] = "application/json");
+        using var harness = new ResilientHandlerHarness(options, RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+        using var content = new ByteArrayContent([1, 2, 3]);
+
+        using var response = await harness.SendAsync("api/items", HttpMethod.Post, content);
+
+        Assert.Equal(["application/json"], harness.Inner.Requests[0].ContentHeaders["Content-Type"]);
+        Assert.False(harness.Inner.Requests[0].Headers.ContainsKey("Content-Type"));
+    }
+
+    [Fact]
+    public async Task DefaultHeaders_DoNotOverrideContentTypeOfRequest()
+    {
+        var options = TestOptions.Fast(o => o.DefaultHeaders["Content-Type"] = "text/plain");
+        using var harness = new ResilientHandlerHarness(options, RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+        using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+
+        using var response = await harness.SendAsync("api/items", HttpMethod.Post, content);
+
+        Assert.Equal(["application/json; charset=utf-8"], harness.Inner.Requests[0].ContentHeaders["Content-Type"]);
+    }
+
+    [Fact]
+    public async Task DefaultHeaders_ContentHeaderWithoutContent_IsIgnored()
+    {
+        var options = TestOptions.Fast(o => o.DefaultHeaders["Content-Type"] = "application/json");
+        using var harness = new ResilientHandlerHarness(options, RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+
+        using var response = await harness.SendAsync("api/items");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(harness.Inner.Requests[0].Headers.ContainsKey("Content-Type"));
+    }
+
+    [Fact]
+    public async Task DefaultHeaders_AreAppliedToAbsoluteUri()
+    {
+        var options = TestOptions.Fast(o => o.DefaultHeaders["X-Default"] = "yes");
+        using var harness = new ResilientHandlerHarness(options, RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+
+        using var response = await harness.SendAsync("https://absolute.test/items");
+
+        Assert.Equal(["yes"], harness.Inner.Requests[0].Headers["X-Default"]);
+    }
+
+    [Fact]
+    public async Task Timeout_Disabled_DoesNotCancelSlowRequest()
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Timeout = TimeSpan.Zero;
+            o.Resilience.Retry.Enabled = false;
+        });
+
+        using var harness = new ResilientHandlerHarness(options, SlowHandler(TimeSpan.FromMilliseconds(50)));
+
+        using var response = await harness.SendAsync("api/items");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CustomMethod_IsNotRetriedByDefault()
+    {
+        using var harness = new ResilientHandlerHarness(
+            TestOptions.Fast(),
+            RecordingHttpMessageHandler.Sequence(HttpStatusCode.InternalServerError, HttpStatusCode.OK));
+
+        using var response = await harness.SendAsync("api/items", new HttpMethod("CUSTOM"));
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(1, harness.Inner.CallCount);
+    }
+
+    [Fact]
+    public async Task RetryNonIdempotentMethods_WithZeroAttempts_DoesNotRetry()
+    {
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.Retry.RetryNonIdempotentMethods = true;
+            o.Resilience.Retry.MaxRetryAttempts = 0;
+        });
+
+        using var harness = new ResilientHandlerHarness(
+            options,
+            RecordingHttpMessageHandler.Status(HttpStatusCode.InternalServerError));
+
+        using var response = await harness.SendAsync("api/items", HttpMethod.Post);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(1, harness.Inner.CallCount);
+    }
+
+    [Fact]
+    public async Task AlreadyCancelledToken_DoesNotCallInnerHandler()
+    {
+        using var harness = new ResilientHandlerHarness(TestOptions.Fast(), RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            harness.SendAsync("api/items", cancellationToken: cancellation.Token));
+
+        Assert.Equal(0, harness.Inner.CallCount);
+    }
+
+    [Fact]
+    public async Task ResponseStatusAndHeaders_AreReturned()
+    {
+        var inner = new RecordingHttpMessageHandler((_, _, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Created);
+            response.Headers.TryAddWithoutValidation("X-Request-Id", "abc");
+            return Task.FromResult(response);
+        });
+
+        using var harness = new ResilientHandlerHarness(TestOptions.Fast(), inner);
+
+        using var response = await harness.SendAsync("api/items");
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(["abc"], response.Headers.GetValues("X-Request-Id"));
+    }
+
+    [Fact]
+    public async Task RequestVersionAndPolicy_AreCopied()
+    {
+        using var harness = new ResilientHandlerHarness(TestOptions.Fast(), RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+        var request = new HttpRequestMessage(HttpMethod.Get, "api/items")
+        {
+            Version = new Version(2, 0),
+            VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+        };
+
+        using var response = await harness.SendAsync(request);
+
+        Assert.Equal(new Version(2, 0), harness.Inner.Requests[0].Version);
+        Assert.Equal(HttpVersionPolicy.RequestVersionExact, harness.Inner.Requests[0].VersionPolicy);
+    }
+
+    [Fact]
+    public async Task MultipleHeaderValues_AreCopied()
+    {
+        using var harness = new ResilientHandlerHarness(TestOptions.Fast(), RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+        var request = new HttpRequestMessage(HttpMethod.Get, "api/items");
+        request.Headers.TryAddWithoutValidation("X-Multi", ["one", "two"]);
+
+        using var response = await harness.SendAsync(request);
+
+        Assert.Equal(["one", "two"], harness.Inner.Requests[0].Headers["X-Multi"]);
+    }
+
+    [Fact]
+    public async Task ResilienceDisabled_WithContent_DoesNotBuffer()
+    {
+        using var harness = new ResilientHandlerHarness(TestOptions.WithoutResilience(), RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+        using var content = new StringContent("payload", Encoding.UTF8);
+
+        using var response = await harness.SendAsync("api/items", HttpMethod.Put, content);
+
+        Assert.Same(content, harness.Inner.Requests[0].Content);
+        Assert.Equal("payload", harness.Inner.Requests[0].BodyText);
+    }
+
+    [Fact]
+    public async Task Retry_LogsRequestAndRetryMessages()
+    {
+        var entries = new List<LogEntry>();
+        using var harness = new ResilientHandlerHarness(
+            TestOptions.Fast(),
+            RecordingHttpMessageHandler.Sequence(HttpStatusCode.InternalServerError, HttpStatusCode.OK),
+            loggerFactory: new RecordingLoggerFactory(entries));
+
+        using var response = await harness.SendAsync("api/items");
+
+        Assert.Contains(entries, entry =>
+            entry.Message.Contains("test-client", StringComparison.Ordinal) &&
+            entry.Message.Contains("повторы", StringComparison.Ordinal));
+        Assert.Contains(entries, entry =>
+            entry.Level == LogLevel.Warning &&
+            entry.Message.Contains("повтор", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CircuitBreaker_LogsOpenAndClose()
+    {
+        var entries = new List<LogEntry>();
+        var options = TestOptions.Fast(o =>
+        {
+            o.Resilience.Retry.Enabled = false;
+            o.Resilience.CircuitBreaker = new CircuitBreakerOptions
+            {
+                Enabled = true,
+                FailureRatio = 0.5,
+                MinimumThroughput = 2,
+                SamplingDuration = TimeSpan.FromMilliseconds(500),
+                BreakDuration = TimeSpan.FromMilliseconds(500),
+            };
+        });
+
+        using var harness = new ResilientHandlerHarness(
+            options,
+            new RecordingHttpMessageHandler((index, _, _) =>
+                Task.FromResult(index < 2 ? Responses.Status(HttpStatusCode.InternalServerError) : Responses.Ok())),
+            loggerFactory: new RecordingLoggerFactory(entries));
+
+        using var first = await harness.SendAsync("api/items");
+        using var second = await harness.SendAsync("api/items");
+
+        Assert.Contains(entries, entry =>
+            entry.Level == LogLevel.Error &&
+            entry.Message.Contains("предохранитель разомкнут", StringComparison.OrdinalIgnoreCase));
+
+        await Task.Delay(TimeSpan.FromMilliseconds(700));
+
+        using var third = await harness.SendAsync("api/items");
+
+        Assert.Contains(entries, entry =>
+            entry.Message.Contains("предохранитель закрыт", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(408)]
+    [InlineData(429)]
+    [InlineData(500)]
+    [InlineData(502)]
+    [InlineData(503)]
+    [InlineData(504)]
+    public async Task Retry_RetriesAllDefaultTransientStatusCodes(int statusCode)
+    {
+        using var harness = new ResilientHandlerHarness(
+            TestOptions.Fast(),
+            RecordingHttpMessageHandler.Sequence((HttpStatusCode)statusCode, HttpStatusCode.OK));
+
+        using var response = await harness.SendAsync("api/items");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(2, harness.Inner.CallCount);
+    }
+
+    [Theory]
+    [InlineData(400)]
+    [InlineData(404)]
+    [InlineData(501)]
+    public async Task Retry_DoesNotRetryNonTransientStatusCodes(int statusCode)
+    {
+        using var harness = new ResilientHandlerHarness(
+            TestOptions.Fast(),
+            RecordingHttpMessageHandler.Status((HttpStatusCode)statusCode));
+
+        using var response = await harness.SendAsync("api/items");
+
+        Assert.Equal((HttpStatusCode)statusCode, response.StatusCode);
+        Assert.Equal(1, harness.Inner.CallCount);
     }
 
     private static RecordingHttpMessageHandler SlowHandler(TimeSpan delay) =>

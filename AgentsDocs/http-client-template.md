@@ -3,6 +3,9 @@
 Основное руководство — в корне библиотеки: [`Common.Helper.Http/README.md`](../Common.Helper.Http/README.md).
 Примеры отдельно для сервера и отдельно для Blazor WASM — в
 [`Common.Helper.Http/usage-server-and-wasm.md`](../Common.Helper.Http/usage-server-and-wasm.md).
+Практические пары «клиент ↔ сервер» (JSON, query, form, multipart, файлы, потоки, ошибки,
+идемпотентность) — в
+[`Common.Helper.Http/usage-cases.md`](../Common.Helper.Http/usage-cases.md).
 Там регистрация в DI, полная схема `appsettings.json`, горячая перезагрузка, поведение
 таймаутов/повторов/предохранителя и ограничения.
 

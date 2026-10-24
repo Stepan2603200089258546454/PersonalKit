@@ -32,6 +32,10 @@ public sealed class ResilientHttpClientOptionsValidator : IValidateOptions<Resil
         {
             failures.Add($"{prefix}: секция Resilience не задана.");
         }
+        else if (!options.Resilience.Enabled)
+        {
+            // Устойчивость выключена: значения вложенных секций не применяются, проверять их не нужно.
+        }
         else
         {
             ValidateRetry(prefix, options.Resilience, failures);
@@ -68,6 +72,11 @@ public sealed class ResilientHttpClientOptionsValidator : IValidateOptions<Resil
         if (options.Timeout < TimeSpan.Zero)
         {
             failures.Add($"{prefix}: Timeout не может быть отрицательным.");
+        }
+        else if (options.Timeout > ResilienceLimits.MaxTotalTimeout)
+        {
+            failures.Add(
+                $"{prefix}: Timeout не может превышать {ResilienceLimits.MaxTotalTimeout.TotalDays:F1} суток.");
         }
     }
 
@@ -117,10 +126,18 @@ public sealed class ResilientHttpClientOptionsValidator : IValidateOptions<Resil
         {
             failures.Add($"{prefix}: Resilience:Retry:Delay не может быть отрицательным.");
         }
+        else if (retry.Delay > ResilienceLimits.MaxRetryDelay)
+        {
+            failures.Add($"{prefix}: Resilience:Retry:Delay не может превышать одни сутки.");
+        }
 
         if (retry.MaxDelay < TimeSpan.Zero)
         {
             failures.Add($"{prefix}: Resilience:Retry:MaxDelay не может быть отрицательным.");
+        }
+        else if (retry.MaxDelay > ResilienceLimits.MaxRetryDelay)
+        {
+            failures.Add($"{prefix}: Resilience:Retry:MaxDelay не может превышать одни сутки.");
         }
 
         if (retry.MaxDelay > TimeSpan.Zero && retry.MaxDelay < retry.Delay)
@@ -145,24 +162,31 @@ public sealed class ResilientHttpClientOptionsValidator : IValidateOptions<Resil
             return;
         }
 
-        if (circuitBreaker.FailureRatio <= 0 || circuitBreaker.FailureRatio > 1)
+        if (double.IsNaN(circuitBreaker.FailureRatio)
+            || circuitBreaker.FailureRatio <= 0
+            || circuitBreaker.FailureRatio > 1)
         {
             failures.Add($"{prefix}: Resilience:CircuitBreaker:FailureRatio должен быть в диапазоне (0, 1].");
         }
 
-        if (circuitBreaker.MinimumThroughput <= 0)
+        if (circuitBreaker.MinimumThroughput < ResilienceLimits.MinCircuitBreakerThroughput)
         {
-            failures.Add($"{prefix}: Resilience:CircuitBreaker:MinimumThroughput должен быть больше нуля.");
+            failures.Add(
+                $"{prefix}: Resilience:CircuitBreaker:MinimumThroughput должен быть не меньше {ResilienceLimits.MinCircuitBreakerThroughput}.");
         }
 
-        if (circuitBreaker.SamplingDuration <= TimeSpan.Zero)
+        if (circuitBreaker.SamplingDuration < ResilienceLimits.MinCircuitBreakerDuration
+            || circuitBreaker.SamplingDuration > ResilienceLimits.MaxCircuitBreakerDuration)
         {
-            failures.Add($"{prefix}: Resilience:CircuitBreaker:SamplingDuration должен быть больше нуля.");
+            failures.Add(
+                $"{prefix}: Resilience:CircuitBreaker:SamplingDuration должен быть в диапазоне от 500 мс до 1 суток.");
         }
 
-        if (circuitBreaker.BreakDuration <= TimeSpan.Zero)
+        if (circuitBreaker.BreakDuration < ResilienceLimits.MinCircuitBreakerDuration
+            || circuitBreaker.BreakDuration > ResilienceLimits.MaxCircuitBreakerDuration)
         {
-            failures.Add($"{prefix}: Resilience:CircuitBreaker:BreakDuration должен быть больше нуля.");
+            failures.Add(
+                $"{prefix}: Resilience:CircuitBreaker:BreakDuration должен быть в диапазоне от 500 мс до 1 суток.");
         }
 
         ValidateStatusCodes(prefix, "Resilience:CircuitBreaker:BreakStatusCodes", circuitBreaker.BreakStatusCodes, failures);
@@ -177,14 +201,21 @@ public sealed class ResilientHttpClientOptionsValidator : IValidateOptions<Resil
             return;
         }
 
-        if (attemptTimeout.Enabled && attemptTimeout.Timeout <= TimeSpan.Zero)
+        if (!attemptTimeout.Enabled)
         {
-            failures.Add($"{prefix}: Resilience:AttemptTimeout:Timeout должен быть больше нуля при включённом таймауте.");
+            if (attemptTimeout.Timeout < TimeSpan.Zero)
+            {
+                failures.Add($"{prefix}: Resilience:AttemptTimeout:Timeout не может быть отрицательным.");
+            }
+
+            return;
         }
 
-        if (!attemptTimeout.Enabled && attemptTimeout.Timeout < TimeSpan.Zero)
+        if (attemptTimeout.Timeout < ResilienceLimits.MinAttemptTimeout
+            || attemptTimeout.Timeout > ResilienceLimits.MaxAttemptTimeout)
         {
-            failures.Add($"{prefix}: Resilience:AttemptTimeout:Timeout не может быть отрицательным.");
+            failures.Add(
+                $"{prefix}: Resilience:AttemptTimeout:Timeout при включённом таймауте должен быть в диапазоне от 10 мс до 1 суток.");
         }
     }
 

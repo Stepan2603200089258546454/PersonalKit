@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Common.Helper.Http.Tests.Infrastructure;
+using Common.Helper.Http.Tests.Models;
 
 namespace Common.Helper.Http.Tests.Http;
 
@@ -137,7 +138,7 @@ public sealed class HttpRequestBuilderTests
 
         var query = handler.Requests[0].RequestUri!.Query;
         Assert.Contains("ratio=1.5", query, StringComparison.Ordinal);
-        Assert.Contains("enabled=True", query, StringComparison.Ordinal);
+        Assert.Contains("enabled=true", query, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -422,6 +423,236 @@ public sealed class HttpRequestBuilderTests
         var builder = new HttpRequestBuilder(client).WithCompletionOption(HttpCompletionOption.ResponseHeadersRead);
 
         Assert.NotNull(builder);
+    }
+
+    [Fact]
+    public async Task QueryParameters_FragmentIsPreserved()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items#section")
+            .WithQuery("page", 2)
+            .SendAsync();
+
+        var uri = handler.Requests[0].RequestUri!;
+        Assert.Equal("?page=2", uri.Query);
+        Assert.Equal("#section", uri.Fragment);
+    }
+
+    [Fact]
+    public async Task QueryParameters_TrailingQuestionMark_DoesNotDuplicateSeparator()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items?")
+            .WithQuery("page", 2)
+            .SendAsync();
+
+        Assert.Equal("?page=2", handler.Requests[0].RequestUri!.Query);
+    }
+
+    [Fact]
+    public async Task QueryParameters_DuplicateNames_AreKept()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items")
+            .WithQuery("tag", "one")
+            .WithQuery("tag", "two")
+            .SendAsync();
+
+        Assert.Equal("?tag=one&tag=two", handler.Requests[0].RequestUri!.Query);
+    }
+
+    [Fact]
+    public async Task WithHeader_LastValueWins()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items")
+            .WithHeader("X-Test", "first")
+            .WithHeader("X-Test", "second")
+            .SendAsync();
+
+        Assert.Equal(["second"], handler.Requests[0].Headers["X-Test"]);
+    }
+
+    [Fact]
+    public async Task WithHeader_ContentTypeOverridesContentHeader()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items", HttpMethod.Post)
+            .WithStringContent("{}")
+            .WithHeader("Content-Type", "application/json")
+            .SendAsync();
+
+        Assert.Equal(["application/json"], handler.Requests[0].ContentHeaders["Content-Type"]);
+    }
+
+    [Fact]
+    public async Task WithHeader_ContentHeaderWithoutContent_IsIgnored()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items")
+            .WithHeader("Content-Type", "application/json")
+            .SendAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(handler.Requests[0].Headers.ContainsKey("Content-Type"));
+    }
+
+    [Fact]
+    public async Task GetRequest_HasNoContent()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items").SendAsync();
+
+        Assert.Null(handler.Requests[0].Content);
+    }
+
+    [Fact]
+    public async Task WithJsonContent_NullValue_SendsJsonNull()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items", HttpMethod.Post)
+            .WithJsonContent<object?>(null)
+            .SendAsync();
+
+        Assert.Equal("null", handler.Requests[0].BodyText);
+    }
+
+    [Fact]
+    public async Task WithJsonContent_JsonTypeInfo_NullValue_SendsJsonNull()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items", HttpMethod.Post)
+            .WithJsonContent<ItemDto>(null!, TestJsonContext.Default.ItemDto)
+            .SendAsync();
+
+        Assert.Equal("null", handler.Requests[0].BodyText);
+    }
+
+    [Fact]
+    public async Task WithByteArrayContent_UsesDefaultMediaType()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/upload", HttpMethod.Post)
+            .WithByteArrayContent([1, 2, 3])
+            .SendAsync();
+
+        Assert.Contains("application/octet-stream", handler.Requests[0].ContentHeaders["Content-Type"].Single(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithStreamContent_UsesDefaultMediaType()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes("payload"));
+
+        using var response = await client.NewRequest("api/upload", HttpMethod.Post)
+            .WithStreamContent(stream)
+            .SendAsync();
+
+        Assert.Contains("application/octet-stream", handler.Requests[0].ContentHeaders["Content-Type"].Single(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithStringContent_UsesCustomEncoding()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/report", HttpMethod.Post)
+            .WithStringContent("text", "text/plain", Encoding.Unicode)
+            .SendAsync();
+
+        Assert.Contains("utf-16", handler.Requests[0].ContentHeaders["Content-Type"].Single(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WithFormUrlEncodedContent_Empty_ProducesEmptyBody()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/login", HttpMethod.Post)
+            .WithFormUrlEncodedContent(new Dictionary<string, string?>())
+            .SendAsync();
+
+        Assert.Equal(string.Empty, handler.Requests[0].BodyText);
+    }
+
+    [Fact]
+    public async Task WithBasicAuthentication_EmptyPassword_IsAllowed()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+        var expected = Convert.ToBase64String(Encoding.UTF8.GetBytes("user:"));
+
+        using var response = await client.NewRequest("api/items")
+            .WithBasicAuthentication("user", string.Empty)
+            .SendAsync();
+
+        Assert.Equal([$"Basic {expected}"], handler.Requests[0].Headers["Authorization"]);
+    }
+
+    [Fact]
+    public async Task WithJsonContent_RawJson_UsesCustomMediaType()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items", HttpMethod.Post)
+            .WithJsonContent("""{"title":"problem"}""", "application/problem+json")
+            .SendAsync();
+
+        Assert.Contains(
+            "application/problem+json",
+            handler.Requests[0].ContentHeaders["Content-Type"].Single(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithStringContent_UsesDefaultMediaType()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/report", HttpMethod.Post)
+            .WithStringContent("text")
+            .SendAsync();
+
+        Assert.Contains("text/plain", handler.Requests[0].ContentHeaders["Content-Type"].Single(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithByteArrayContent_EmptyArray_IsSent()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/upload", HttpMethod.Post)
+            .WithByteArrayContent([])
+            .SendAsync();
+
+        Assert.Empty(handler.Requests[0].Body!);
     }
 
     private static HttpClient CreateClient(RecordingHttpMessageHandler handler) =>

@@ -22,10 +22,13 @@ public sealed class ResilientHttpClientOptionsTests
         Assert.Equal(DelayBackoffType.Exponential, options.Resilience.Retry.BackoffType);
         Assert.True(options.Resilience.Retry.UseJitter);
         Assert.Equal(TimeSpan.FromSeconds(30), options.Resilience.Retry.MaxDelay);
+        Assert.Null(options.Resilience.Retry.RetryStatusCodes);
+        Assert.False(options.Resilience.Retry.RetryNonIdempotentMethods);
         Assert.True(options.Resilience.CircuitBreaker.Enabled);
         Assert.Equal(0.5, options.Resilience.CircuitBreaker.FailureRatio);
         Assert.Equal(100, options.Resilience.CircuitBreaker.MinimumThroughput);
         Assert.Equal(TimeSpan.FromSeconds(5), options.Resilience.CircuitBreaker.BreakDuration);
+        Assert.Null(options.Resilience.CircuitBreaker.BreakStatusCodes);
         Assert.True(options.Resilience.AttemptTimeout.Enabled);
         Assert.Equal(TimeSpan.FromSeconds(10), options.Resilience.AttemptTimeout.Timeout);
     }
@@ -48,6 +51,7 @@ public sealed class ResilientHttpClientOptionsTests
             ["HttpClients:TestApi:Resilience:Retry:BackoffType"] = "Linear",
             ["HttpClients:TestApi:Resilience:Retry:RetryStatusCodes:0"] = "500",
             ["HttpClients:TestApi:Resilience:Retry:RetryStatusCodes:1"] = "503",
+            ["HttpClients:TestApi:Resilience:Retry:RetryNonIdempotentMethods"] = "true",
             ["HttpClients:TestApi:Resilience:CircuitBreaker:Enabled"] = "true",
             ["HttpClients:TestApi:Resilience:CircuitBreaker:FailureRatio"] = "0.25",
             ["HttpClients:TestApi:Resilience:CircuitBreaker:MinimumThroughput"] = "10",
@@ -74,6 +78,7 @@ public sealed class ResilientHttpClientOptionsTests
         Assert.Equal(DelayBackoffType.Linear, options.Resilience.Retry.BackoffType);
         Assert.NotNull(options.Resilience.Retry.RetryStatusCodes);
         Assert.Equal([500, 503], options.Resilience.Retry.RetryStatusCodes);
+        Assert.True(options.Resilience.Retry.RetryNonIdempotentMethods);
 
         Assert.Equal(0.25, options.Resilience.CircuitBreaker.FailureRatio);
         Assert.Equal(10, options.Resilience.CircuitBreaker.MinimumThroughput);

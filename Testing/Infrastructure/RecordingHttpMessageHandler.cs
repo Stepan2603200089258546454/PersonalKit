@@ -45,6 +45,8 @@ internal sealed class RecordingHttpMessageHandler : HttpMessageHandler
             ? null
             : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
 
+        var optionKeys = request.Options.Select(option => option.Key).ToArray();
+
         var recorded = new RecordedRequest
         {
             Method = request.Method.Method,
@@ -52,6 +54,10 @@ internal sealed class RecordingHttpMessageHandler : HttpMessageHandler
             Headers = request.Headers.ToDictionary(h => h.Key, h => h.Value.ToArray(), StringComparer.OrdinalIgnoreCase),
             ContentHeaders = contentHeaders,
             Body = body,
+            Content = request.Content,
+            Version = request.Version,
+            VersionPolicy = request.VersionPolicy,
+            OptionKeys = optionKeys,
         };
 
         var index = Requests.Count;

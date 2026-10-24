@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -17,7 +15,7 @@ namespace Common.Helper.Http;
 /// </summary>
 public sealed class MultipartFormDataBuilder
 {
-    private static readonly JsonSerializerOptions DefaultJsonOptions = new(JsonSerializerDefaults.Web);
+    private const string DefaultContentType = "application/octet-stream";
 
     private readonly List<MultipartPart> _parts = [];
 
@@ -27,7 +25,7 @@ public sealed class MultipartFormDataBuilder
     public MultipartFormDataBuilder AddField(string name, string? value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        _parts.Add(new MultipartPart { Kind = MultipartPartKind.Field, Name = name, Value = value ?? string.Empty });
+        _parts.Add(MultipartPart.Field(name, value ?? string.Empty));
         return this;
     }
 
@@ -45,7 +43,7 @@ public sealed class MultipartFormDataBuilder
     public MultipartFormDataBuilder AddJson<T>(string name, T value, JsonSerializerOptions? options = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return AddJsonPart(name, JsonSerializer.Serialize(value, options ?? DefaultJsonOptions));
+        return AddJsonPart(name, JsonSerializer.Serialize(value, options ?? JsonSerializerOptions.Web));
     }
 
     /// <summary>
@@ -79,15 +77,7 @@ public sealed class MultipartFormDataBuilder
         ArgumentNullException.ThrowIfNull(content);
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
 
-        _parts.Add(new MultipartPart
-        {
-            Kind = MultipartPartKind.Bytes,
-            Name = name,
-            Bytes = content,
-            FileName = fileName,
-            ContentType = contentType ?? "application/octet-stream",
-        });
-
+        _parts.Add(MultipartPart.Bytes(name, content, contentType ?? DefaultContentType, fileName));
         return this;
     }
 
@@ -106,15 +96,7 @@ public sealed class MultipartFormDataBuilder
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
 
-        _parts.Add(new MultipartPart
-        {
-            Kind = MultipartPartKind.Stream,
-            Name = name,
-            Stream = stream,
-            FileName = fileName,
-            ContentType = contentType ?? "application/octet-stream",
-        });
-
+        _parts.Add(MultipartPart.Stream(name, stream, contentType ?? DefaultContentType, fileName));
         return this;
     }
 
@@ -127,27 +109,7 @@ public sealed class MultipartFormDataBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(stream);
 
-        _parts.Add(new MultipartPart
-        {
-            Kind = MultipartPartKind.Stream,
-            Name = name,
-            Stream = stream,
-            ContentType = contentType ?? "application/octet-stream",
-        });
-
-        return this;
-    }
-
-    private MultipartFormDataBuilder AddJsonPart(string name, string json)
-    {
-        _parts.Add(new MultipartPart
-        {
-            Kind = MultipartPartKind.Json,
-            Name = name,
-            Value = json,
-            ContentType = "application/json",
-        });
-
+        _parts.Add(MultipartPart.Stream(name, stream, contentType ?? DefaultContentType, fileName: null));
         return this;
     }
 
@@ -157,45 +119,22 @@ public sealed class MultipartFormDataBuilder
 
         foreach (var part in _parts)
         {
-            switch (part.Kind)
+            if (part.FileName is null)
             {
-                case MultipartPartKind.Field:
-                    content.Add(new StringContent(part.Value ?? string.Empty, Encoding.UTF8), part.Name);
-                    break;
-
-                case MultipartPartKind.Json:
-                    content.Add(
-                        new StringContent(part.Value ?? "null", Encoding.UTF8, part.ContentType ?? "application/json"),
-                        part.Name);
-                    break;
-
-                case MultipartPartKind.Bytes:
-                    AddBinaryPart(content, part, new ByteArrayContent(part.Bytes ?? []));
-                    break;
-
-                case MultipartPartKind.Stream:
-                    AddBinaryPart(content, part, new StreamContent(part.Stream!));
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Неизвестный вид части формы: {part.Kind}.");
+                content.Add(part.CreateContent(), part.Name);
+            }
+            else
+            {
+                content.Add(part.CreateContent(), part.Name, part.FileName);
             }
         }
 
         return content;
     }
 
-    private static void AddBinaryPart(MultipartFormDataContent content, MultipartPart part, HttpContent httpContent)
+    private MultipartFormDataBuilder AddJsonPart(string name, string json)
     {
-        httpContent.Headers.ContentType = new MediaTypeHeaderValue(part.ContentType ?? "application/octet-stream");
-
-        if (string.IsNullOrEmpty(part.FileName))
-        {
-            content.Add(httpContent, part.Name);
-        }
-        else
-        {
-            content.Add(httpContent, part.Name, part.FileName);
-        }
+        _parts.Add(MultipartPart.Json(name, json));
+        return this;
     }
 }

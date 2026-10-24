@@ -8,6 +8,6 @@ public sealed class TimeoutOptions
     /// <summary>Включает таймаут.</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Длительность таймаута. Должна быть больше нуля, если таймаут включён.</summary>
+    /// <summary>Длительность таймаута: от 10 мс до 1 суток, если таймаут включён.</summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(10);
 }

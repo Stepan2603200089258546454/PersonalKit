@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -395,6 +396,158 @@ public sealed class ServiceCollectionExtensionsTests
 
         Assert.ThrowsAny<ArgumentException>(() =>
             services.AddResilientHttpClient("named", configuration, " "));
+    }
+
+    [Fact]
+    public async Task NamedClients_UseTheirOwnSettings()
+    {
+        var inner = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        var configuration = BuildConfiguration(new Dictionary<string, string?>()
+        {
+            ["HttpClients:First:BaseAddress"] = "https://first.test/",
+            ["HttpClients:Second:BaseAddress"] = "https://second.test/",
+        });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient("first-client", configuration, "HttpClients:First")
+            .ConfigurePrimaryHttpMessageHandler(() => inner);
+        services
+            .AddResilientHttpClient("second-client", configuration, "HttpClients:Second")
+            .ConfigurePrimaryHttpMessageHandler(() => inner);
+
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IHttpClientFactory>();
+
+        using var first = await factory.CreateClient("first-client").GetAsync("api/items");
+        using var second = await factory.CreateClient("second-client").GetAsync("api/items");
+
+        Assert.Equal("https://first.test/api/items", inner.Requests[0].RequestUri!.ToString());
+        Assert.Equal("https://second.test/api/items", inner.Requests[1].RequestUri!.ToString());
+    }
+
+    [Fact]
+    public void NamedClient_OptionsAreBoundToClientName()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>()
+        {
+            ["HttpClients:Named:BaseAddress"] = "https://named.test/",
+            ["HttpClients:Named:Timeout"] = "00:00:11",
+        });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddResilientHttpClient("named-client", configuration, "HttpClients:Named")
+            .ConfigurePrimaryHttpMessageHandler(() => RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+
+        using var provider = services.BuildServiceProvider();
+        var monitor = provider.GetRequiredService<IOptionsMonitor<ResilientHttpClientOptions>>();
+
+        var options = monitor.Get("named-client");
+
+        Assert.Equal("https://named.test/", options.BaseAddress);
+        Assert.Equal(TimeSpan.FromSeconds(11), options.Timeout);
+    }
+
+    [Fact]
+    public void OptionsValidator_IsRegisteredOnceForAllClients()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>());
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddResilientHttpClient("first", configuration, "HttpClients:First")
+            .ConfigurePrimaryHttpMessageHandler(() => RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+        services.AddResilientHttpClient("second", configuration, "HttpClients:Second")
+            .ConfigurePrimaryHttpMessageHandler(() => RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+
+        using var provider = services.BuildServiceProvider();
+        var validators = provider.GetServices<IValidateOptions<ResilientHttpClientOptions>>().ToArray();
+
+        Assert.Single(validators);
+    }
+
+    [Fact]
+    public async Task MissingSection_UsesDefaults_RelativeRequestThrows()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>());
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddResilientHttpClient<ITestClient, TestClient>(configuration, Section)
+            .ConfigurePrimaryHttpMessageHandler(() => RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<ITestClient>();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetAsync("api/items"));
+
+        Assert.Contains("BaseAddress", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvalidNestedConfiguration_FailsValidationOnFirstUse()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>()
+        {
+            [$"{Section}:BaseAddress"] = "https://config.test/",
+            [$"{Section}:Resilience:CircuitBreaker:MinimumThroughput"] = "1",
+        });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient<ITestClient, TestClient>(configuration, Section)
+            .ConfigurePrimaryHttpMessageHandler(() => RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<ITestClient>();
+
+        await Assert.ThrowsAsync<OptionsValidationException>(() => client.GetAsync("api/items"));
+    }
+
+    [Fact]
+    public void PipelineCache_IsRegisteredAsSingleton()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>());
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddResilientHttpClient("first", configuration, "HttpClients:First")
+            .ConfigurePrimaryHttpMessageHandler(() => RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+        services.AddResilientHttpClient("second", configuration, "HttpClients:Second")
+            .ConfigurePrimaryHttpMessageHandler(() => RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.Same(
+            provider.GetRequiredService<ResiliencePipelineCache>(),
+            provider.GetRequiredService<ResiliencePipelineCache>());
+    }
+
+    [Fact]
+    public async Task NamedClient_ConfigureAction_IsApplied()
+    {
+        var inner = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        var configuration = BuildConfiguration(new Dictionary<string, string?>());
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient(
+                "configured",
+                configuration,
+                "HttpClients:Configured",
+                options => options.BaseAddress = "https://default.test/")
+            .ConfigurePrimaryHttpMessageHandler(() => inner);
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("configured");
+
+        using var response = await client.GetAsync("api/items");
+
+        Assert.Equal("https://default.test/api/items", inner.Requests[0].RequestUri!.ToString());
     }
 
     private static IConfigurationRoot BuildConfiguration(IDictionary<string, string?> values) =>

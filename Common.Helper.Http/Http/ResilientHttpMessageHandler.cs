@@ -30,6 +30,13 @@ internal sealed class ResilientHttpMessageHandler : DelegatingHandler
     private readonly ResiliencePipelineCache _pipelines;
     private readonly ILogger? _logger;
 
+    /// <summary>
+    /// Последний нормализованный базовый адрес: конфигурация меняется редко, а запросов много.
+    /// Хранится парой «исходная строка → адрес», поэтому перезагрузка конфигурации
+    /// не требует сброса кэша, а память не растёт от истории изменений.
+    /// </summary>
+    private Tuple<string, Uri>? _baseAddressCache;
+
     public ResilientHttpMessageHandler(
         string clientName,
         IOptionsMonitor<ResilientHttpClientOptions> options,
@@ -54,9 +61,14 @@ internal sealed class ResilientHttpMessageHandler : DelegatingHandler
 
         var options = _options.Get(_clientName);
         var requestUri = ResolveRequestUri(request, options);
-        var body = request.Content is null
-            ? null
-            : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        var allowRetry = ResolveRetryAllowed(request.Method, options);
+
+        // Тело читается в память только если запрос может быть повторён.
+        // Без повторов содержимое уходит в сеть как есть: загрузка файла в браузере
+        // не требует лишней копии всего тела.
+        var body = allowRetry && request.Content is not null
+            ? await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false)
+            : null;
 
         var timeout = options.Timeout;
         using var timeoutCts = timeout > TimeSpan.Zero ? new CancellationTokenSource(timeout) : null;
@@ -67,19 +79,19 @@ internal sealed class ResilientHttpMessageHandler : DelegatingHandler
         var token = linkedCts?.Token ?? cancellationToken;
 
         _logger?.LogDebug(
-            "HTTP client '{ClientName}': запрос {Method} {Uri}, таймаут {Timeout}.",
+            "HTTP client '{ClientName}': запрос {Method} {Uri}, таймаут {Timeout}, повторы {RetryMode}.",
             _clientName,
             request.Method,
             requestUri,
-            timeout > TimeSpan.Zero ? timeout : TimeSpan.MaxValue);
+            timeout > TimeSpan.Zero ? timeout : TimeSpan.MaxValue,
+            allowRetry ? "включены" : "выключены");
 
         try
         {
-            var allowRetry = ResolveRetryAllowed(request.Method, options);
             var pipeline = _pipelines.GetPipeline(_clientName, options, allowRetry);
 
             return await pipeline.ExecuteAsync(
-                ct => SendAttemptAsync(request, requestUri, body, options, ct),
+                ct => SendAttemptAsync(request, requestUri, body, allowRetry, options, ct),
                 token).ConfigureAwait(false);
         }
         catch (OperationCanceledException exception)
@@ -91,20 +103,23 @@ internal sealed class ResilientHttpMessageHandler : DelegatingHandler
         }
     }
 
-    private async ValueTask<HttpResponseMessage> SendAttemptAsync(
+    private ValueTask<HttpResponseMessage> SendAttemptAsync(
         HttpRequestMessage request,
         Uri requestUri,
         byte[]? body,
+        bool allowRetry,
         ResilientHttpClientOptions options,
         CancellationToken cancellationToken)
     {
-        var clone = CreateRequest(request, requestUri, body, options);
-        return await base.SendAsync(clone, cancellationToken).ConfigureAwait(false);
+        var clone = CreateRequest(request, requestUri, body, allowRetry, options);
+        return new ValueTask<HttpResponseMessage>(base.SendAsync(clone, cancellationToken));
     }
 
     private static bool ResolveRetryAllowed(HttpMethod method, ResilientHttpClientOptions options)
     {
-        if (options.Resilience?.Retry is not { Enabled: true } retry || retry.MaxRetryAttempts <= 0)
+        if (options.Resilience is not { Enabled: true } resilience
+            || resilience.Retry is not { Enabled: true } retry
+            || retry.MaxRetryAttempts <= 0)
         {
             return false;
         }
@@ -119,7 +134,7 @@ internal sealed class ResilientHttpMessageHandler : DelegatingHandler
         return method.Method.ToUpperInvariant() is "GET" or "HEAD" or "OPTIONS" or "TRACE" or "PUT" or "DELETE";
     }
 
-    private static Uri ResolveRequestUri(HttpRequestMessage request, ResilientHttpClientOptions options)
+    private Uri ResolveRequestUri(HttpRequestMessage request, ResilientHttpClientOptions options)
     {
         var requestUri = request.RequestUri
             ?? throw new InvalidOperationException("У запроса не задан RequestUri.");
@@ -152,17 +167,31 @@ internal sealed class ResilientHttpMessageHandler : DelegatingHandler
         uri.Scheme == Uri.UriSchemeHttps &&
         string.Equals(uri.Host, DynamicBaseHost, StringComparison.OrdinalIgnoreCase);
 
-    private static Uri GetBaseAddress(ResilientHttpClientOptions options)
+    private Uri GetBaseAddress(ResilientHttpClientOptions options)
     {
-        if (string.IsNullOrWhiteSpace(options.BaseAddress))
+        var baseAddressText = options.BaseAddress;
+        if (string.IsNullOrWhiteSpace(baseAddressText))
         {
             throw new InvalidOperationException(
                 "Для запроса с относительным адресом не настроен BaseAddress HTTP-клиента.");
         }
 
-        if (!Uri.TryCreate(options.BaseAddress, UriKind.Absolute, out var baseAddress))
+        var cached = Volatile.Read(ref _baseAddressCache);
+        if (cached is not null && string.Equals(cached.Item1, baseAddressText, StringComparison.Ordinal))
         {
-            throw new InvalidOperationException($"BaseAddress '{options.BaseAddress}' не является абсолютным URI.");
+            return cached.Item2;
+        }
+
+        var baseAddress = NormalizeBaseAddress(baseAddressText);
+        Volatile.Write(ref _baseAddressCache, Tuple.Create(baseAddressText, baseAddress));
+        return baseAddress;
+    }
+
+    private static Uri NormalizeBaseAddress(string baseAddressText)
+    {
+        if (!Uri.TryCreate(baseAddressText, UriKind.Absolute, out var baseAddress))
+        {
+            throw new InvalidOperationException($"BaseAddress '{baseAddressText}' не является абсолютным URI.");
         }
 
         // Базовый адрес без завершающего слэша трактуется как каталог:
@@ -180,6 +209,7 @@ internal sealed class ResilientHttpMessageHandler : DelegatingHandler
         HttpRequestMessage source,
         Uri requestUri,
         byte[]? body,
+        bool allowRetry,
         ResilientHttpClientOptions options)
     {
         var clone = new HttpRequestMessage(source.Method, requestUri)
@@ -198,32 +228,67 @@ internal sealed class ResilientHttpMessageHandler : DelegatingHandler
             clone.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), option.Value);
         }
 
-        if (body is not null)
+        if (source.Content is not null)
         {
-            var content = new ByteArrayContent(body);
-            if (source.Content is not null)
-            {
-                foreach (var header in source.Content.Headers)
-                {
-                    content.Headers.TryAddWithoutValidation(header.Key, header.Value);
-                }
-            }
-
-            clone.Content = content;
+            // При одной попытке содержимое переиспользуется: копия тела не нужна.
+            clone.Content = body is null
+                ? source.Content
+                : CreateBufferedContent(source.Content, body);
         }
 
-        var defaultHeaders = options.DefaultHeaders;
-        if (defaultHeaders is not null)
-        {
-            foreach (var header in defaultHeaders)
-            {
-                if (!clone.Headers.Contains(header.Key))
-                {
-                    clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
-                }
-            }
-        }
+        ApplyDefaultHeaders(clone, options);
 
         return clone;
+    }
+
+    private static ByteArrayContent CreateBufferedContent(HttpContent source, byte[] body)
+    {
+        var content = new ByteArrayContent(body);
+        foreach (var header in source.Headers)
+        {
+            content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        return content;
+    }
+
+    private static void ApplyDefaultHeaders(HttpRequestMessage request, ResilientHttpClientOptions options)
+    {
+        var defaultHeaders = options.DefaultHeaders;
+        if (defaultHeaders is null)
+        {
+            return;
+        }
+
+        foreach (var header in defaultHeaders)
+        {
+            // Contains у HttpHeaders бросает исключение для заголовка «чужого» вида
+            // (например, Content-Type в заголовках запроса), поэтому проверяем перебором.
+            if (HasHeader(request.Headers, header.Key)
+                || (request.Content is not null && HasHeader(request.Content.Headers, header.Key)))
+            {
+                continue;
+            }
+
+            // Заголовки содержимого (Content-Type и подобные) применяются к телу,
+            // если оно есть: HttpClient не принимает их в Headers запроса.
+            if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value) && request.Content is not null)
+            {
+                request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+    }
+
+    private static bool HasHeader(System.Net.Http.Headers.HttpHeaders headers, string name)
+    {
+        foreach (var header in headers)
+        {
+            if (string.Equals(header.Key, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

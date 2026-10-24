@@ -11,11 +11,17 @@
 - горячая перезагрузка всех параметров без перезапуска приложения;
 - fluent-запросы: JSON, `application/x-www-form-urlencoded`, `multipart/form-data`
   (поля, файлы, потоки, байты, JSON-части), текст, байты, поток, готовое `HttpContent`;
-- параметры строки запроса, заголовки, Bearer/Basic-аутентификация;
+- параметры строки запроса (включая коллекции и флаги), заголовки, Bearer/Basic-аутентификация;
 - чтение JSON-ответа в модель с кодом ответа, заголовками и исходным телом;
 - совместимость с trimming и AOT: перегрузки с `JsonTypeInfo<T>` для source-generated JSON,
   сборка помечена `IsTrimmable`/`IsAotCompatible`;
-- безопасные для браузера повторы: POST/PATCH по умолчанию не повторяются.
+- безопасные для браузера повторы: POST/PATCH по умолчанию не повторяются;
+- тело запроса не копируется, если запрос не может быть повторён: потоковая выгрузка
+  в браузере не требует лишней копии в памяти;
+- ошибка с телом не в формате модели (HTML-страница 500) не превращается в `JsonException`:
+  тело остаётся в `RawContent` для `EnsureSuccess`;
+- параметры проверяются по границам Polly заранее — вместо исключения при первом запросе
+  приходит понятное сообщение `OptionsValidationException`.
 
 ## Структура
 
@@ -23,12 +29,13 @@
 
 ```
 Common.Helper.Http/
-├── Configurations/        модели настроек и валидатор
+├── Configurations/        модели настроек, валидатор и границы значений
 │   ├── ResilientHttpClientOptions.cs
 │   ├── ResilienceOptions.cs
 │   ├── RetryOptions.cs
 │   ├── CircuitBreakerOptions.cs
 │   ├── TimeoutOptions.cs
+│   ├── ResilienceLimits.cs
 │   └── ResilientHttpClientOptionsValidator.cs
 ├── DependencyInjection/   регистрация в DI
 │   └── ServiceCollectionExtensions.cs
@@ -36,18 +43,22 @@ Common.Helper.Http/
 │   ├── ResilientHttpMessageHandler.cs
 │   ├── HttpRequestBuilder.cs
 │   ├── HttpClientExtensions.cs
+│   ├── QueryStringBuilder.cs
+│   ├── QueryParameter.cs
+│   ├── QueryValueFormatter.cs
 │   └── Multipart/
 │       ├── MultipartFormDataBuilder.cs
-│       ├── MultipartPart.cs
-│       └── MultipartPartKind.cs
+│       └── MultipartPart.cs
 ├── Models/                модели ответа
-│   └── ApiResponse.cs
+│   ├── ApiResponse.cs
+│   └── HttpStatus.cs
 ├── Resilience/            конвейер устойчивости и его кэш
 │   ├── ResiliencePipelineFactory.cs
 │   ├── ResiliencePipelineCache.cs
 │   └── ResiliencePipelineCacheEntry.cs
 ├── README.md
 ├── usage-server-and-wasm.md   примеры для сервера и Blazor WASM
+├── usage-cases.md             пары «клиент ↔ сервер» для типовых сценариев
 └── appsettings.example.json
 ```
 
@@ -134,7 +145,8 @@ builder.Services.AddResilientHttpClient<IGitHubApi, GitHubApi>(
           "MaxDelay": "00:00:30",
           "BackoffType": "Exponential",
           "UseJitter": true,
-          "RetryStatusCodes": [408, 429, 500, 502, 503, 504]
+          "RetryStatusCodes": [408, 429, 500, 502, 503, 504],
+          "RetryNonIdempotentMethods": false
         },
         "CircuitBreaker": {
           "Enabled": true,
@@ -157,19 +169,21 @@ builder.Services.AddResilientHttpClient<IGitHubApi, GitHubApi>(
 | Параметр | Значение |
 |---|---|
 | `BaseAddress` | абсолютный адрес http/https. Без завершающего слэша трактуется как каталог: `https://host/v1` и `https://host/v1/` дают одинаковый результат |
-| `Timeout` | общий таймаут запроса вместе со всеми повторами. `00:00:00` отключает ограничение |
-| `DefaultHeaders` | добавляются к каждому запросу, если такого заголовка нет в самом запросе |
+| `Timeout` | общий таймаут запроса вместе со всеми повторами. `00:00:00` отключает ограничение; максимум — около 49 суток (ограничение `CancellationTokenSource`) |
+| `DefaultHeaders` | добавляются к каждому запросу, если такого заголовка нет в самом запросе. Заголовки содержимого (`Content-Type` и подобные) применяются к телу, если оно есть |
 | `Retry:MaxRetryAttempts` | число повторов после первой попытки (`3` — до 4 попыток), `0` отключает повторы |
-| `Retry:Delay`, `MaxDelay` | базовая и максимальная задержка перед повтором |
+| `Retry:Delay`, `MaxDelay` | базовая и максимальная задержка перед повтором. `MaxDelay: 0` — без верхней границы; обе не больше 1 суток |
 | `Retry:BackoffType` | `Constant`, `Linear`, `Exponential` |
-| `Retry:RetryStatusCodes` | коды ответа, при которых выполняется повтор |
+| `Retry:RetryStatusCodes` | коды ответа, при которых выполняется повтор; пустой массив — значения по умолчанию |
 | `Retry:RetryNonIdempotentMethods` | повторять ли POST/PATCH. По умолчанию `false`: повтор может создать дубликат |
-| `CircuitBreaker:FailureRatio` | доля ошибок в окне выборки, размыкающая предохранитель (0–1) |
-| `CircuitBreaker:MinimumThroughput` | минимум вызовов в окне, после которого предохранитель может разомкнуться |
-| `AttemptTimeout` | таймаут одной попытки; при истечении попытка считается неуспешной и может быть повторена |
+| `CircuitBreaker:FailureRatio` | доля ошибок в окне выборки, размыкающая предохранитель: больше 0 и не больше 1 |
+| `CircuitBreaker:MinimumThroughput` | минимум вызовов в окне (не меньше 2), после которого предохранитель может разомкнуться |
+| `CircuitBreaker:SamplingDuration`, `BreakDuration` | окно выборки и пауза разомкнутого состояния: от 500 мс до 1 суток |
+| `AttemptTimeout` | таймаут одной попытки (от 10 мс до 1 суток); при истечении попытка считается неуспешной и может быть повторена |
 
-Параметры проверяются при первом обращении к клиенту. При ошибке бросается
-`OptionsValidationException` с описанием всех найденных проблем.
+Параметры проверяются при первом обращении к клиенту (и при каждой перезагрузке конфигурации).
+Границы соответствуют требованиям Polly, поэтому невалидное значение не доходит до конвейера.
+При ошибке бросается `OptionsValidationException` с описанием всех найденных проблем.
 
 ## Fluent-запросы
 
@@ -197,15 +211,29 @@ await httpClient.NewRequest("api/items").WithMethod(HttpMethod.Patch).SendAsync(
 httpClient.NewRequest("api/items")
     .WithQuery("page", 2)
     .WithQuery("search", "привет мир")
+    .WithQuery("id", new[] { 1, 2, 3 })          // ?id=1&id=2&id=3
+    .WithQuery("debug")                          // ?debug (без значения)
     .WithQuery(new Dictionary<string, string?>
     {
         ["sort"] = "name",
-        ["filter"] = null, // пустое значение
+        ["filter"] = null, // пустое значение: filter=
     });
 ```
 
-Имена и значения кодируются; существующая строка запроса дополняется через `&`.
-Значения объектов форматируются в инвариантной культуре.
+Правила:
+
+- имена и значения кодируются по RFC 3986 (`Uri.EscapeDataString`), поэтому `&`, `=`, `+`, `#`,
+  пробел и кириллица безопасны; параметры разделяются `&`, порядок и повторяющиеся имена сохраняются;
+- существующая строка запроса дополняется, а фрагмент адреса остаётся в конце:
+  `api/items#section` + `page=2` → `api/items?page=2#section`; завершающие `?` и `&` не дублируются;
+- коллекция (массив, `List<T>`, любая `IEnumerable`, кроме `string`) раскрывается в несколько
+  параметров с тем же именем; пустая коллекция не добавляет ничего, `null` внутри коллекции даёт
+  пустое значение;
+- значения форматируются в инвариантной культуре: `bool` → `true`/`false`, `DateTime`
+  и `DateTimeOffset` → ISO 8601 с часовым поясом, `DateOnly` → `yyyy-MM-dd`, `TimeOnly` →
+  `HH:mm:ss` с дробной частью при наличии, перечисления → имя, остальные типы — через
+  `IFormattable`. Для нестандартного формата передайте уже готовую строку;
+- `WithQuery(name)` добавляет флаг без `=`, `WithQuery(name, null)` — пустое значение `name=`.
 
 ### Заголовки и аутентификация
 
@@ -221,6 +249,8 @@ httpClient.NewRequest("api/items").WithBasicAuthentication("user", "password");
 
 `WithHeader(name, null)` удаляет ранее добавленный заголовок. Заголовки из
 `DefaultHeaders` конфигурации применяются обработчиком и имеют меньший приоритет, чем заголовки запроса.
+Заголовок содержимого (`Content-Type` и подобные) применяется к телу запроса и заменяет
+значение, заданное содержимым: удобно, когда тип известен только коду вызова.
 
 ### JSON
 
@@ -235,7 +265,8 @@ var item = result.EnsureSuccess().Content;
 
 - по умолчанию используется `JsonSerializerDefaults.Web` (camelCase, регистронезависимое чтение);
 - свои настройки: `.WithJsonSerializerOptions(options)` или второй аргумент `WithJsonContent(value, options)`;
-- готовая строка JSON: `.WithJsonContent("{\"name\":\"raw\"}")` — без повторной сериализации.
+- готовая строка JSON: `.WithJsonContent("{\"name\":\"raw\"}")` — без повторной сериализации;
+  для другого медиатипа есть второй аргумент: `.WithJsonContent(json, "application/problem+json")`.
 
 Для trimming/AOT используйте перегрузки с метаданными source-generated контекста:
 
@@ -317,8 +348,11 @@ if (!result.IsSuccessStatusCode)
 var item = result.EnsureSuccess().Content; // бросит HttpRequestException для не-2xx
 ```
 
-`SendJsonAsync` не бросает исключение на HTTP-коды ошибок; тело разбирается как JSON
-(для пустого тела `Content` = `null`). Невалидный JSON даёт `JsonException`.
+`SendJsonAsync` не бросает исключение на HTTP-коды ошибок. Для пустого тела `Content` = `null`.
+Если тело неуспешного ответа не является JSON нужной модели (типичный случай — HTML-страница
+`500` от прокси), исключение не бросается: `Content` остаётся `null`, а тело доступно в
+`RawContent` и попадает в сообщение `EnsureSuccess`. Для успешного ответа невалидный JSON
+по-прежнему даёт `JsonException` — это признак ошибки в контракте API.
 Для произвольного тела используйте `SendAsync` и работайте с `HttpResponseMessage`.
 
 ### Повторная отправка
@@ -345,6 +379,8 @@ var item = result.EnsureSuccess().Content; // бросит HttpRequestException 
 ## Сервер и Blazor WebAssembly
 
 Примеры для обоих окружений — в [`usage-server-and-wasm.md`](usage-server-and-wasm.md).
+Готовые пары «клиент → сервер» для JSON, query, form, multipart, потоков, ошибок и
+идемпотентности — в [`usage-cases.md`](usage-cases.md).
 
 | | Сервер (ASP.NET Core) | Blazor WebAssembly |
 |---|---|---|
@@ -360,8 +396,12 @@ var item = result.EnsureSuccess().Content; // бросит HttpRequestException 
 - `HttpClient.Timeout` равен `Timeout.InfiniteTimeSpan`: таймауты применяет обработчик, поэтому
   они могут меняться на лету. При срабатывании общего таймаута бросается `TaskCanceledException`
   с внутренним `TimeoutException` (как у штатного `HttpClient`).
-- Тело запроса один раз буферизуется в память и переотправляется при повторах. Для больших
-  потоковых выгрузок отключайте повторы (`Retry:MaxRetryAttempts: 0`).
+- Тело запроса копируется в память только когда запрос действительно может быть повторён
+  (метод идемпотентный или включён `RetryNonIdempotentMethods`, повторы не отключены).
+  Если повторов нет — содержимое уходит в сеть без копии: потоковые выгрузки не занимают
+  память целиком. Для больших выгрузок с включёнными повторами тело всё равно буферизуется,
+  поэтому там лучше `Retry:MaxRetryAttempts: 0`.
+- Базовый адрес нормализуется один раз и кэшируется до изменения значения в конфигурации.
 - Промежуточные ответы неуспешных попыток освобождаются автоматически.
 - Повторы и предохранитель считают неуспешными: `HttpRequestException`, таймаут попытки
   и коды ответа из `RetryStatusCodes` / `BreakStatusCodes`.
@@ -383,7 +423,7 @@ var item = result.EnsureSuccess().Content; // бросит HttpRequestException 
 | `OperationCanceledException` | отменён токен вызывающего кода |
 | `HttpRequestException` | транспортная ошибка после исчерпания повторов |
 | `BrokenCircuitException` | предохранитель разомкнут, вызов отклонён без отправки |
-| `JsonException` | тело ответа в `SendJsonAsync` не является JSON |
+| `JsonException` | тело успешного ответа в `SendJsonAsync` не является JSON нужной модели |
 
 При исчерпании повторов по коду ответа исключение не бросается — возвращается последний
 `HttpResponseMessage` (например, `500`).
@@ -409,8 +449,10 @@ dotnet run --project Testing
 dotnet test PersonalKit.slnx -m:1
 ```
 
-Покрыты параметры и валидация, устойчивость, горячая перезагрузка, JSON, формы, multipart,
-потоки, байты, заголовки, query, ответы и ошибки fluent-обёртки. Сейчас это 194 теста.
+Покрыты параметры и валидация (включая границы Polly), устойчивость, горячая перезагрузка,
+JSON, формы, multipart, потоки, байты, заголовки, query (форматирование, коллекции, флаги,
+кодирование), ответы и ошибки fluent-обёртки, буферизация тела, кэш конвейеров и журналирование.
+Сейчас это 333 теста.
 
 ## Сборка решения
 

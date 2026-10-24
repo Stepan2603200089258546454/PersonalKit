@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -34,7 +33,7 @@ public sealed class HttpRequestBuilder
     private static readonly JsonSerializerOptions DefaultJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _client;
-    private readonly List<KeyValuePair<string, string?>> _query = [];
+    private readonly QueryStringBuilder _query = new();
     private readonly List<KeyValuePair<string, string>> _headers = [];
 
     private string? _requestUri;
@@ -78,28 +77,47 @@ public sealed class HttpRequestBuilder
         return this;
     }
 
-    /// <summary>Добавляет параметр строки запроса. Значение приводится к инвариантной культуре.</summary>
+    /// <summary>
+    /// Добавляет параметр строки запроса.
+    /// Значение приводится к инвариантной культуре: <c>bool</c> → <c>true</c>/<c>false</c>,
+    /// даты и время → ISO 8601, остальные типы — через <see cref="IFormattable"/>.
+    /// Коллекция (кроме строки) раскрывается в несколько параметров с тем же именем.
+    /// </summary>
     /// <param name="name">Имя параметра.</param>
-    /// <param name="value">Значение; <c>null</c> даёт пустое значение.</param>
+    /// <param name="value">
+    /// Значение; <c>null</c> даёт пустое значение (<c>?name=</c>).
+    /// Пустая коллекция не добавляет ни одного параметра.
+    /// </param>
     public HttpRequestBuilder WithQuery(string name, object? value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        _query.Add(new KeyValuePair<string, string?>(
-            name,
-            Convert.ToString(value, CultureInfo.InvariantCulture)));
+        _query.Add(name, value);
+        return this;
+    }
+
+    /// <summary>
+    /// Добавляет параметр без значения — флаг вида <c>?debug</c>.
+    /// </summary>
+    /// <param name="name">Имя параметра.</param>
+    public HttpRequestBuilder WithQuery(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _query.AddFlag(name);
         return this;
     }
 
     /// <summary>Добавляет несколько параметров строки запроса.</summary>
-    /// <param name="parameters">Имена и значения параметров.</param>
+    /// <param name="parameters">Имена и значения параметров; <c>null</c> в значении даёт пустое значение.</param>
     public HttpRequestBuilder WithQuery(IEnumerable<KeyValuePair<string, string?>> parameters)
     {
         ArgumentNullException.ThrowIfNull(parameters);
 
         foreach (var parameter in parameters)
         {
-            WithQuery(parameter.Key, parameter.Value);
+            ArgumentException.ThrowIfNullOrWhiteSpace(parameter.Key);
         }
+
+        _query.AddRange(parameters);
 
         return this;
     }
@@ -107,6 +125,7 @@ public sealed class HttpRequestBuilder
     /// <summary>
     /// Добавляет заголовок запроса. Если заголовок с таким именем уже задан, он заменяется.
     /// Значение <c>null</c> удаляет заголовок.
+    /// Заголовки содержимого (<c>Content-Type</c> и подобные) применяются к телу запроса.
     /// </summary>
     /// <param name="name">Имя заголовка.</param>
     /// <param name="value">Значение заголовка.</param>
@@ -340,6 +359,9 @@ public sealed class HttpRequestBuilder
     /// Отправляет запрос, читает тело как JSON и возвращает результат с кодом ответа,
     /// заголовками, моделью и исходным текстом. Ошибки HTTP-кода не бросают исключение —
     /// для проверки используйте <see cref="ApiResponse{T}.EnsureSuccess"/>.
+    /// Если тело неуспешного ответа не соответствует модели (например, HTML-страница ошибки),
+    /// <see cref="ApiResponse{T}.Content"/> остаётся пустым, а тело доступно в
+    /// <see cref="ApiResponse{T}.RawContent"/>.
     /// </summary>
     /// <typeparam name="T">Тип модели ответа.</typeparam>
     /// <param name="cancellationToken">Токен отмены.</param>
@@ -380,7 +402,15 @@ public sealed class HttpRequestBuilder
         T? content = default;
         if (!string.IsNullOrWhiteSpace(rawContent))
         {
-            content = deserialize(rawContent);
+            try
+            {
+                content = deserialize(rawContent);
+            }
+            catch (JsonException) when (!HttpStatus.IsSuccess(response.StatusCode))
+            {
+                // Неуспешный ответ пришёл не в формате модели: тело сохраняется в RawContent,
+                // чтобы EnsureSuccess показал его в сообщении об ошибке.
+            }
         }
 
         return new ApiResponse<T>(response.StatusCode, response.Headers, content, rawContent);
@@ -401,32 +431,29 @@ public sealed class HttpRequestBuilder
 
         var request = new HttpRequestMessage(_method, BuildRequestUri());
 
-        foreach (var header in _headers)
-        {
-            request.Headers.TryAddWithoutValidation(header.Key, header.Value);
-        }
-
         if (_contentFactory is not null)
         {
             request.Content = _contentFactory();
         }
 
+        foreach (var header in _headers)
+        {
+            if (request.Headers.TryAddWithoutValidation(header.Key, header.Value))
+            {
+                continue;
+            }
+
+            // Заголовки содержимого (Content-Type, Content-Encoding и подобные) живут на теле,
+            // а не на запросе; явный заголовок заменяет значение, заданное содержимым.
+            if (request.Content is not null)
+            {
+                request.Content.Headers.Remove(header.Key);
+                request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+
         return request;
     }
 
-    private string BuildRequestUri()
-    {
-        if (_query.Count == 0)
-        {
-            return _requestUri!;
-        }
-
-        var separator = _requestUri!.Contains('?') ? '&' : '?';
-        var queryString = string.Join(
-            '&',
-            _query.Select(parameter =>
-                $"{Uri.EscapeDataString(parameter.Key)}={Uri.EscapeDataString(parameter.Value ?? string.Empty)}"));
-
-        return _requestUri + separator + queryString;
-    }
+    private string BuildRequestUri() => _query.AppendTo(_requestUri!);
 }

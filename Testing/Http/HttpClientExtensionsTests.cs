@@ -43,6 +43,24 @@ public sealed class HttpClientExtensionsTests
     }
 
     [Fact]
+    public async Task NewRequest_WithUriThenMethod_UsesMethod()
+    {
+        var handler = RecordingHttpMessageHandler.Status(HttpStatusCode.OK);
+        using var client = CreateClient(handler);
+
+        using var response = await client.NewRequest("api/items", HttpMethod.Put).SendAsync();
+
+        Assert.Equal("PUT", handler.Requests[0].Method);
+    }
+
+    [Fact]
+    public void NewRequest_MethodOverload_NullClient_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            HttpClientExtensions.NewRequest(null!, HttpMethod.Get, "api/items"));
+    }
+
+    [Fact]
     public void NewRequest_NullClient_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => HttpClientExtensions.NewRequest(null!, "api/items"));

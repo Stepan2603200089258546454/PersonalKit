@@ -11,13 +11,13 @@ public sealed class CircuitBreakerOptions
     /// <summary>Доля неуспешных вызовов, при которой предохранитель размыкается. От 0 до 1.</summary>
     public double FailureRatio { get; set; } = 0.5;
 
-    /// <summary>Минимальное число вызовов в окне выборки, после которого предохранитель может разомкнуться.</summary>
+    /// <summary>Минимальное число вызовов в окне выборки, после которого предохранитель может разомкнуться. Не меньше 2.</summary>
     public int MinimumThroughput { get; set; } = 100;
 
-    /// <summary>Длительность окна выборки.</summary>
+    /// <summary>Длительность окна выборки: от 500 мс до 1 суток.</summary>
     public TimeSpan SamplingDuration { get; set; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Длительность разомкнутого состояния, после которого выполняется пробный вызов.</summary>
+    /// <summary>Длительность разомкнутого состояния: от 500 мс до 1 суток.</summary>
     public TimeSpan BreakDuration { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
