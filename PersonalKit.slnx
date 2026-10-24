@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/Common/">
+    <Project Path="Common.Helper.Http/Common.Helper.Http.csproj" />
+  </Folder>
+  <Folder Name="/Common/Testing/">
+    <Project Path="Testing/Common.Helper.Http.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Элементы решения/">
+    <File Path="AGENTS.md" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+  </Folder>
+  <Folder Name="/AgentsDocs/">
+    <File Path="AgentsDocs/http-client-template.md" />
+    <File Path="AgentsDocs/README.md" />
+  </Folder>
+  <Folder Name="/AgentsTools/">
+    <File Path="AgentsTools/README.md" />
+    <File Path="AgentsTools/Sync-Solution.ps1" />
+  </Folder>
+</Solution>
