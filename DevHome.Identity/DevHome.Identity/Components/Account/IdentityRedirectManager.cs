@@ -1,0 +1,34 @@
+using Microsoft.AspNetCore.Components;
+
+namespace DevHome.Identity.Components.Account
+{
+    internal sealed class IdentityRedirectManager(NavigationManager navigationManager)
+    {
+        public const string StatusMessageKey = "Identity.StatusMessage";
+
+        public void RedirectTo(string? uri)
+        {
+            uri ??= "";
+
+            // Защита от открытых перенаправлений.
+            if (!Uri.IsWellFormedUriString(uri, UriKind.Relative)
+                || uri.StartsWith("//", StringComparison.Ordinal))
+            {
+                uri = navigationManager.ToBaseRelativePath(uri);
+            }
+
+            navigationManager.NavigateTo(uri);
+        }
+
+        public void RedirectTo(string uri, Dictionary<string, object?> queryParameters)
+        {
+            var uriWithoutQuery = navigationManager.ToAbsoluteUri(uri).GetLeftPart(UriPartial.Path);
+            var newUri = navigationManager.GetUriWithQueryParameters(uriWithoutQuery, queryParameters);
+            RedirectTo(newUri);
+        }
+
+        private string CurrentPath => navigationManager.ToAbsoluteUri(navigationManager.Uri).GetLeftPart(UriPartial.Path);
+
+        public void RedirectToCurrentPage() => RedirectTo(CurrentPath);
+    }
+}

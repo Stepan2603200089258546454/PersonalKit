@@ -1,0 +1,40 @@
+﻿@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Ошибка</PageTitle>
+
+<h1 class="text-danger">Ошибка.</h1>
+<h2 class="text-danger">При обработке вашего запроса произошла ошибка.</h2>
+
+@if (ShowRequestId)
+{
+    <p>
+        <strong>Идентификатор запроса:</strong> <code>@RequestId</code>
+    </p>
+}
+
+<h3>Режим разработки</h3>
+<p>
+    Переключение на среду <strong>Development</strong> позволит увидеть более подробные сведения о произошедшей ошибке.
+</p>
+<p>
+    <strong>Среду Development не следует включать в развёрнутых приложениях.</strong>
+    Иначе конечным пользователям могут отображаться конфиденциальные сведения из исключений.
+    Для локальной отладки включите среду <strong>Development</strong>, задав переменной среды <strong>ASPNETCORE_ENVIRONMENT</strong> значение <strong>Development</strong>
+    и перезапустив приложение.
+</p>
+
+@code{
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    [PersistentState]
+    public string? RequestId { get; set; }
+
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized()
+    {
+        RequestId ??= Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+    }
+}

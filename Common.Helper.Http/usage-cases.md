@@ -5,7 +5,7 @@
 скачивание файлов, сырой JSON/текст, ошибки, повтор POST.
 
 Для каждого кейса даны оба варианта сервера: **Minimal API** и **контроллер MVC**.
-Всё написано под .NET 10 и `System.Text.Json` с веб-настройками (camelCase) — это совпадает
+Всё написано под .NET 11 и `System.Text.Json` с веб-настройками (camelCase) — это совпадает
 с настройками библиотеки по умолчанию.
 
 Оглавление:
@@ -140,6 +140,11 @@ builder.Services.AddResilientHttpClient<ICasesApi, CasesApi>(
     builder.Configuration,
     "HttpClients:CasesApi");
 ```
+
+Раздел устойчивости действует только при наличии в файле: если убрать `CircuitBreaker`
+или `AttemptTimeout`, соответствующая стратегия не применяется; если убрать `Resilience`
+целиком, остаются только `Timeout` и заголовки. `Retry` без `Enabled` включается по факту
+наличия раздела, `Enabled: false` отключает его явно.
 
 В коде клиента понадобятся также `using System.Net;` (коды ответа) и
 `using System.Net.Http.Json;` (чтение JSON из `HttpContent`).

@@ -1,0 +1,105 @@
+﻿@page "/Account/Manage/RenamePasskey/{Id}"
+
+@using DevHome.Identity.DataContext.Models
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using System.Buffers.Text
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+
+<EditForm Model="Input" OnValidSubmit="Rename" FormName="rename-passkey" method="post">
+    <DataAnnotationsValidator />
+    @if (passkey?.Name is { } name)
+    {
+        <h4>Введите новое имя для ключа доступа «@name»</h4>
+    }
+    else
+    {
+        <h4>Введите имя для ключа доступа</h4>
+    }
+    <hr />
+    <div role="alert" aria-atomic="true">
+        <ValidationSummary class="text-danger" />
+    </div>
+    <div class="form-floating mb-3">
+        <InputText @bind-Value="Input.Name" id="Input.Name" class="form-control" aria-required="true" placeholder="Мой ключ доступа" />
+        <label for="Input.Name" class="form-label">Имя ключа доступа</label>
+        <ValidationMessage For="() => Input.Name" class="text-danger" />
+    </div>
+    <div>
+        <button type="submit" class="w-100 btn btn-lg btn-primary">Продолжить</button>
+    </div>
+</EditForm>
+
+@code {
+    private ApplicationUser? user;
+    private UserPasskeyInfo? passkey;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromTempData(Name = IdentityRedirectManager.StatusMessageKey)]
+    private string? IdentityStatusMessage { get; set; }
+
+    [Parameter]
+    public string? Id { get; set; }
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        IdentityStatusMessage = null;
+        Input ??= new();
+
+        user = (await UserManager.GetUserAsync(HttpContext.User))!;
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
+        }
+
+        byte[] credentialId;
+        try
+        {
+            credentialId = Base64Url.DecodeFromChars(Id);
+        }
+        catch (FormatException)
+        {
+            IdentityStatusMessage = "Ошибка: указанный идентификатор ключа доступа имеет неверный формат.";
+            RedirectManager.RedirectTo("Account/Manage/Passkeys");
+            return;
+        }
+
+        passkey = await UserManager.GetPasskeyAsync(user, credentialId);
+        if (passkey is null)
+        {
+            IdentityStatusMessage = "Ошибка: указанный ключ доступа не найден.";
+            RedirectManager.RedirectTo("Account/Manage/Passkeys");
+            return;
+        }
+    }
+
+    private async Task Rename()
+    {
+        passkey!.Name = Input.Name;
+        var result = await UserManager.AddOrUpdatePasskeyAsync(user!, passkey);
+        if (!result.Succeeded)
+        {
+            IdentityStatusMessage = "Ошибка: не удалось обновить ключ доступа.";
+            RedirectManager.RedirectTo("Account/Manage/Passkeys");
+            return;
+        }
+
+        IdentityStatusMessage = "Ключ доступа успешно обновлён.";
+        RedirectManager.RedirectTo("Account/Manage/Passkeys");
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [StringLength(200, ErrorMessage = "Имя ключа доступа должно содержать не более {1} символов.")]
+        public string Name { get; set; } = "";
+    }
+}

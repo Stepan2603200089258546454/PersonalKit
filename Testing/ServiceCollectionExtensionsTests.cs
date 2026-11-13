@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly;
 
 namespace Common.Helper.Http.Tests;
 
@@ -548,6 +549,264 @@ public sealed class ServiceCollectionExtensionsTests
         using var response = await client.GetAsync("api/items");
 
         Assert.Equal("https://default.test/api/items", inner.Requests[0].RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task MissingResilienceSection_DisablesResilience()
+    {
+        var inner = RecordingHttpMessageHandler.Status(HttpStatusCode.InternalServerError);
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            [$"{Section}:BaseAddress"] = "https://config.test/",
+        });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient<ITestClient, TestClient>(configuration, Section)
+            .ConfigurePrimaryHttpMessageHandler(() => inner);
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<ITestClient>();
+        var options = provider
+            .GetRequiredService<IOptionsMonitor<ResilientHttpClientOptions>>()
+            .Get(typeof(ITestClient).FullName!);
+
+        using var response = await client.GetAsync("api/items");
+
+        Assert.False(options.Resilience.Enabled);
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(1, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task OnlyAttemptTimeoutSection_DisablesRetryAndCircuitBreaker()
+    {
+        var inner = RecordingHttpMessageHandler.Status(HttpStatusCode.InternalServerError);
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            [$"{Section}:BaseAddress"] = "https://config.test/",
+            [$"{Section}:Resilience:AttemptTimeout:Timeout"] = "00:00:05",
+        });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient<ITestClient, TestClient>(configuration, Section)
+            .ConfigurePrimaryHttpMessageHandler(() => inner);
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<ITestClient>();
+        var options = provider
+            .GetRequiredService<IOptionsMonitor<ResilientHttpClientOptions>>()
+            .Get(typeof(ITestClient).FullName!);
+
+        using var response = await client.GetAsync("api/items");
+
+        Assert.True(options.Resilience.Enabled);
+        Assert.False(options.Resilience.Retry.Enabled);
+        Assert.False(options.Resilience.CircuitBreaker.Enabled);
+        Assert.True(options.Resilience.AttemptTimeout.Enabled);
+        Assert.Equal(1, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task RetrySectionWithoutEnabled_IsApplied()
+    {
+        var inner = RecordingHttpMessageHandler.Sequence(
+            HttpStatusCode.InternalServerError,
+            HttpStatusCode.InternalServerError,
+            HttpStatusCode.OK);
+
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            [$"{Section}:BaseAddress"] = "https://config.test/",
+            [$"{Section}:Resilience:Retry:MaxRetryAttempts"] = "2",
+            [$"{Section}:Resilience:Retry:Delay"] = "00:00:00.001",
+            [$"{Section}:Resilience:Retry:MaxDelay"] = "00:00:00.005",
+            [$"{Section}:Resilience:Retry:UseJitter"] = "false",
+            [$"{Section}:Resilience:Retry:BackoffType"] = "Constant",
+        });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient<ITestClient, TestClient>(configuration, Section)
+            .ConfigurePrimaryHttpMessageHandler(() => inner);
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<ITestClient>();
+        var options = provider
+            .GetRequiredService<IOptionsMonitor<ResilientHttpClientOptions>>()
+            .Get(typeof(ITestClient).FullName!);
+
+        using var response = await client.GetAsync("api/items");
+
+        Assert.True(options.Resilience.Retry.Enabled);
+        Assert.False(options.Resilience.CircuitBreaker.Enabled);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(3, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task ExplicitResilienceDisabled_DisablesRetry()
+    {
+        var inner = RecordingHttpMessageHandler.Status(HttpStatusCode.InternalServerError);
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            [$"{Section}:BaseAddress"] = "https://config.test/",
+            [$"{Section}:Resilience:Enabled"] = "false",
+            [$"{Section}:Resilience:Retry:MaxRetryAttempts"] = "2",
+            [$"{Section}:Resilience:Retry:Delay"] = "00:00:00.001",
+        });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient<ITestClient, TestClient>(configuration, Section)
+            .ConfigurePrimaryHttpMessageHandler(() => inner);
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<ITestClient>();
+
+        using var response = await client.GetAsync("api/items");
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(1, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task ConfigureAction_CanEnableResilience_WhenSectionIsMissing()
+    {
+        var inner = RecordingHttpMessageHandler.Sequence(
+            HttpStatusCode.InternalServerError,
+            HttpStatusCode.OK);
+
+        var configuration = BuildConfiguration(new Dictionary<string, string?>());
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient<ITestClient, TestClient>(
+                configuration,
+                Section,
+                options =>
+                {
+                    options.BaseAddress = "https://default.test/";
+                    options.Resilience.Enabled = true;
+                    options.Resilience.Retry.Enabled = true;
+                    options.Resilience.Retry.MaxRetryAttempts = 1;
+                    options.Resilience.Retry.Delay = TimeSpan.FromMilliseconds(1);
+                    options.Resilience.Retry.MaxDelay = TimeSpan.FromMilliseconds(5);
+                    options.Resilience.Retry.BackoffType = DelayBackoffType.Constant;
+                    options.Resilience.Retry.UseJitter = false;
+                })
+            .ConfigurePrimaryHttpMessageHandler(() => inner);
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<ITestClient>();
+
+        using var response = await client.GetAsync("api/items");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(2, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task HotReload_AddingResilienceSection_EnablesRetry()
+    {
+        var configuration = new ReloadableConfiguration(new Dictionary<string, string?>
+        {
+            [$"{Section}:BaseAddress"] = "https://config.test/",
+        });
+
+        var inner = RecordingHttpMessageHandler.Sequence(
+            HttpStatusCode.InternalServerError,
+            HttpStatusCode.InternalServerError,
+            HttpStatusCode.OK);
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient<ITestClient, TestClient>(configuration.Configuration, Section)
+            .ConfigurePrimaryHttpMessageHandler(() => inner);
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<ITestClient>();
+        var monitor = provider.GetRequiredService<IOptionsMonitor<ResilientHttpClientOptions>>();
+        var clientName = typeof(ITestClient).FullName!;
+
+        using var first = await client.GetAsync("api/items");
+        Assert.Equal(HttpStatusCode.InternalServerError, first.StatusCode);
+        Assert.Equal(1, inner.CallCount);
+
+        configuration.Reload(new Dictionary<string, string?>
+        {
+            [$"{Section}:BaseAddress"] = "https://config.test/",
+            [$"{Section}:Resilience:Retry:MaxRetryAttempts"] = "1",
+            [$"{Section}:Resilience:Retry:Delay"] = "00:00:00.001",
+            [$"{Section}:Resilience:Retry:MaxDelay"] = "00:00:00.005",
+            [$"{Section}:Resilience:Retry:UseJitter"] = "false",
+            [$"{Section}:Resilience:Retry:BackoffType"] = "Constant",
+        });
+
+        await WaitUntilAsync(
+            () => monitor.Get(clientName).Resilience.Retry.Enabled,
+            TimeSpan.FromSeconds(5));
+
+        using var second = await client.GetAsync("api/items");
+
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Equal(3, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task HotReload_RemovingResilienceSection_DisablesRetry()
+    {
+        var configuration = new ReloadableConfiguration(new Dictionary<string, string?>
+        {
+            [$"{Section}:BaseAddress"] = "https://config.test/",
+            [$"{Section}:Resilience:Retry:MaxRetryAttempts"] = "1",
+            [$"{Section}:Resilience:Retry:Delay"] = "00:00:00.001",
+            [$"{Section}:Resilience:Retry:MaxDelay"] = "00:00:00.005",
+            [$"{Section}:Resilience:Retry:UseJitter"] = "false",
+            [$"{Section}:Resilience:Retry:BackoffType"] = "Constant",
+        });
+
+        var inner = RecordingHttpMessageHandler.Sequence(
+            HttpStatusCode.InternalServerError,
+            HttpStatusCode.OK,
+            HttpStatusCode.InternalServerError,
+            HttpStatusCode.OK);
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient<ITestClient, TestClient>(configuration.Configuration, Section)
+            .ConfigurePrimaryHttpMessageHandler(() => inner);
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<ITestClient>();
+        var monitor = provider.GetRequiredService<IOptionsMonitor<ResilientHttpClientOptions>>();
+        var clientName = typeof(ITestClient).FullName!;
+
+        using var first = await client.GetAsync("api/items");
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(2, inner.CallCount);
+
+        configuration.Reload(new Dictionary<string, string?>
+        {
+            [$"{Section}:BaseAddress"] = "https://config.test/",
+        });
+
+        await WaitUntilAsync(
+            () => !monitor.Get(clientName).Resilience.Enabled,
+            TimeSpan.FromSeconds(5));
+
+        using var second = await client.GetAsync("api/items");
+
+        Assert.Equal(HttpStatusCode.InternalServerError, second.StatusCode);
+        Assert.Equal(3, inner.CallCount);
     }
 
     private static IConfigurationRoot BuildConfiguration(IDictionary<string, string?> values) =>

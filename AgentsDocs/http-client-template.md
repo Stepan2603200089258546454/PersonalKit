@@ -16,6 +16,8 @@
   а также формы, multipart, потоки, байты и текст;
 - параметры — секция `HttpClients:Имя` в `appsettings.json`; для перезагрузки нужен провайдер
   конфигурации с `reloadOnChange: true`;
+- разделы `Resilience`/`Retry`/`CircuitBreaker`/`AttemptTimeout` применяются только при наличии
+  в конфигурации; отсутствующий раздел отключает соответствующую стратегию;
 - относительные адреса разрешены: `BaseAddress` подставляется обработчиком перед каждым запросом;
-- тесты: `dotnet run --project Testing` (в песочнице DSH),
+- тесты: `dotnet run --project Testing` (в песочнице DSH, нужен полный доступ из-за каналов SDK 11),
   `dotnet test PersonalKit.slnx -m:1` (обычное окружение, Visual Studio).

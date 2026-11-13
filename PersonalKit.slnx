@@ -1,11 +1,20 @@
 ﻿<Solution>
+  <Folder Name="/Applications/" />
+  <Folder Name="/Applications/Identity/">
+    <Project Path="DevHome.Identity.DataContext/DevHome.Identity.DataContext.csproj" Id="69df1329-478c-47bd-8ef0-22a8e2bc6d37" />
+    <Project Path="DevHome.Identity/DevHome.Identity.Client/DevHome.Identity.Client.csproj" Id="c7d972f1-7655-4d66-b660-2f439422a800" />
+    <Project Path="DevHome.Identity/DevHome.Identity/DevHome.Identity.csproj" Id="1c2845a8-da31-4148-aa7e-dd05a301730c" />
+  </Folder>
   <Folder Name="/Common/">
+    <Project Path="Common.Helper.DataBase/Common.Helper.DataBase.csproj" Id="17cc7641-7bd0-4822-ba45-42e030c59f81" />
     <Project Path="Common.Helper.Http/Common.Helper.Http.csproj" />
+    <Project Path="Common.Helper.Options/Common.Helper.Options.csproj" Id="c5254917-0e76-4d56-82fc-744c4ef6b3aa" />
   </Folder>
   <Folder Name="/Common/Testing/">
     <Project Path="Testing/Common.Helper.Http.Tests.csproj" />
   </Folder>
   <Folder Name="/Элементы решения/">
+    <File Path=".dockerignore" />
     <File Path=".gitattributes" />
     <File Path=".gitignore" />
     <File Path="AGENTS.md" />

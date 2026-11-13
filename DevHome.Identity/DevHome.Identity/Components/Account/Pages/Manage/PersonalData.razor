@@ -1,0 +1,49 @@
+﻿@page "/Account/Manage/PersonalData"
+
+@using Microsoft.AspNetCore.Identity
+@using DevHome.Identity.DataContext.Models
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Персональные данные</PageTitle>
+
+<StatusMessage Message="@message" />
+<h3>Персональные данные</h3>
+
+<div class="row">
+    <div class="col-md-6">
+        <p>Ваша учётная запись содержит персональные данные, которые вы нам предоставили. На этой странице вы можете скачать или удалить эти данные.</p>
+        <p>
+            <strong>Удаление этих данных приведёт к безвозвратному удалению вашей учётной записи, и восстановить её будет невозможно.</strong>
+        </p>
+        <form action="Account/Manage/DownloadPersonalData" method="post">
+            <button class="btn btn-primary" type="submit">Скачать</button>
+        </form>
+        <p>
+            <a href="Account/Manage/DeletePersonalData" class="btn btn-danger">Удалить</a>
+        </p>
+    </div>
+</div>
+
+@code {
+    private string? message;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromTempData(Name = IdentityRedirectManager.StatusMessageKey)]
+    private string? IdentityStatusMessage { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        message = IdentityStatusMessage;
+        IdentityStatusMessage = null;
+
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+        }
+    }
+}

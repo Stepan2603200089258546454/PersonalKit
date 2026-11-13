@@ -1,0 +1,14 @@
+@if (!string.IsNullOrEmpty(Message))
+{
+    var isError = Message.StartsWith("Error", StringComparison.OrdinalIgnoreCase)
+        || Message.StartsWith("Ошибка", StringComparison.OrdinalIgnoreCase);
+    var statusMessageClass = isError ? "danger" : "success";
+    <div class="alert alert-@statusMessageClass" role="alert">
+        @Message
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string? Message { get; set; }
+}

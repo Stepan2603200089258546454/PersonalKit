@@ -1,6 +1,11 @@
 using System;
 using System.IO;
+using System.Net;
+using Common.Helper.Http.Tests.Infrastructure;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Polly;
 
 namespace Common.Helper.Http.Tests;
@@ -56,7 +61,7 @@ public sealed class AppSettingsExampleTests
     }
 
     [Fact]
-    public void MinimalExample_UsesDefaults()
+    public void MinimalExample_RawBindingKeepsPropertyDefaults()
     {
         var options = LoadExampleSection("InternalApi");
 
@@ -64,6 +69,9 @@ public sealed class AppSettingsExampleTests
         Assert.Equal(TimeSpan.FromSeconds(15), options.Timeout);
         Assert.Empty(options.DefaultHeaders);
 
+        // Прямая привязка без DI не знает о наличии разделов: остаются значения свойств.
+        // При регистрации через AddResilientHttpClient отсутствующий Resilience отключается
+        // (см. MinimalExample_WithoutResilienceSection_DisablesResilienceInDI).
         Assert.True(options.Resilience.Enabled);
         Assert.Equal(3, options.Resilience.Retry.MaxRetryAttempts);
         Assert.Equal(DelayBackoffType.Exponential, options.Resilience.Retry.BackoffType);
@@ -72,6 +80,52 @@ public sealed class AppSettingsExampleTests
         Assert.True(options.Resilience.CircuitBreaker.Enabled);
         Assert.True(options.Resilience.AttemptTimeout.Enabled);
         Assert.Equal(TimeSpan.FromSeconds(10), options.Resilience.AttemptTimeout.Timeout);
+    }
+
+    [Fact]
+    public void MinimalExample_WithoutResilienceSection_DisablesResilienceInDI()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "appsettings.example.json");
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile(path, optional: false, reloadOnChange: false)
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient("InternalApiClient", configuration, "HttpClients:InternalApi")
+            .ConfigurePrimaryHttpMessageHandler(() => RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider
+            .GetRequiredService<IOptionsMonitor<ResilientHttpClientOptions>>()
+            .Get("InternalApiClient");
+
+        Assert.Equal("https://internal.example.local/api/", options.BaseAddress);
+        Assert.False(options.Resilience.Enabled);
+    }
+
+    [Fact]
+    public void RetryOnlyExample_EnablesOnlyRetryInDI()
+    {
+        var configuration = LoadExampleConfiguration();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services
+            .AddResilientHttpClient("RetryOnlyClient", configuration, "HttpClients:RetryOnlyApi")
+            .ConfigurePrimaryHttpMessageHandler(() => RecordingHttpMessageHandler.Status(HttpStatusCode.OK));
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider
+            .GetRequiredService<IOptionsMonitor<ResilientHttpClientOptions>>()
+            .Get("RetryOnlyClient");
+
+        Assert.True(options.Resilience.Enabled);
+        Assert.True(options.Resilience.Retry.Enabled);
+        Assert.Equal(2, options.Resilience.Retry.MaxRetryAttempts);
+        Assert.False(options.Resilience.CircuitBreaker.Enabled);
+        Assert.False(options.Resilience.AttemptTimeout.Enabled);
     }
 
     [Fact]
@@ -86,16 +140,21 @@ public sealed class AppSettingsExampleTests
 
     private static ResilientHttpClientOptions LoadExampleSection(string clientName)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "appsettings.example.json");
-        Assert.True(File.Exists(path), $"Не найден пример настроек: {path}");
-
-        var configuration = new ConfigurationBuilder()
-            .AddJsonFile(path, optional: false, reloadOnChange: false)
-            .Build();
-
-        var options = configuration.GetSection($"HttpClients:{clientName}").Get<ResilientHttpClientOptions>();
+        var options = LoadExampleConfiguration()
+            .GetSection($"HttpClients:{clientName}")
+            .Get<ResilientHttpClientOptions>();
 
         Assert.NotNull(options);
         return options;
+    }
+
+    private static IConfigurationRoot LoadExampleConfiguration()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "appsettings.example.json");
+        Assert.True(File.Exists(path), $"Не найден пример настроек: {path}");
+
+        return new ConfigurationBuilder()
+            .AddJsonFile(path, optional: false, reloadOnChange: false)
+            .Build();
     }
 }

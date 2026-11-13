@@ -1,6 +1,6 @@
 # Правила рабочей области PersonalKit
 
-Область: `E:\Projects\Programs\Infrastructure\PersonalKit`. Решение: `PersonalKit.slnx` (формат `.slnx`), .NET 10.
+Область: `E:\Projects\Programs\Infrastructure\PersonalKit`. Решение: `PersonalKit.slnx` (формат `.slnx`), .NET 11.
 Все пути ниже — относительно корня рабочей области.
 
 ## 1. Где агент хранит свои файлы
@@ -57,7 +57,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File AgentsTools/Sync-Solution.ps
 
 ## 3. Проекты и сборка
 
-- Целевой фреймворк — `net10.0`; в новом проекте включаются `Nullable` и `ImplicitUsings` (как в `Common.Helper.Http`).
+- Целевой фреймворк — `net11.0`; в новом проекте включаются `Nullable` и `ImplicitUsings` (как в `Common.Helper.Http`).
 - Новый проект создаётся в отдельном каталоге в корне рабочей области; имя каталога совпадает с именем проекта.
 - После `dotnet new` проект добавляется в решение командой `dotnet sln add <путь к проекту>` (папка решения создастся по физическому пути), затем выполняется сборка.
 - Версии NuGet-пакетов задаются централизованно в `Directory.Packages.props` (`ManagePackageVersionsCentrally`). В проектах указывается только `<PackageReference Include="Имя.Пакета" />` без `Version`; новый пакет добавляется как `<PackageVersion Include="Имя.Пакета" Version="x.y.z" />` в `Directory.Packages.props`.
@@ -108,6 +108,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File AgentsTools/Sync-Solution.ps
   $env:NUGET_PACKAGES = Join-Path $env:USERPROFILE '.nuget\packages'
   ```
 - Песочница запрещает именованные каналы, поэтому MSBuild не может запускать дочерние узлы: сборка решения в песочнице выполняется с `-m:1` (без флага сборка падает без сообщений об ошибках).
+- В SDK 11 компилятор Roslyn дополнительно открывает именованный канал `\\.\pipe\LOCAL\dotnet_*`; в песочнице DSH это блокируется, и сборка падает с `MSB3883: Access to the path ... is denied` даже с `-m:1`. Для сборки и запуска тестов в песочнице запрашивайте полный доступ (`danger-full-access`); в обычном окружении и Visual Studio ограничение не действует.
 
 ## 6. Чек-лист перед завершением задачи
 

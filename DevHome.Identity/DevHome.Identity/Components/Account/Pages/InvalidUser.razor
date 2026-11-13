@@ -1,0 +1,23 @@
+﻿@page "/Account/InvalidUser"
+
+@using Microsoft.AspNetCore.Identity
+@using DevHome.Identity.DataContext.Models
+@inject UserManager<ApplicationUser> UserManager
+
+<PageTitle>Недопустимый пользователь</PageTitle>
+
+<h3>Недопустимый пользователь</h3>
+
+<StatusMessage Message="@message" />
+
+@code {
+    private string? message;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        message = $"Ошибка: не удалось загрузить пользователя с идентификатором «{UserManager.GetUserId(HttpContext.User)}».";
+    }
+}

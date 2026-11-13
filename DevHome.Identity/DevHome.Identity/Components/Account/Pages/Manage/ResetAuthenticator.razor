@@ -1,0 +1,65 @@
+﻿@page "/Account/Manage/ResetAuthenticator"
+
+@using Microsoft.AspNetCore.Identity
+@using DevHome.Identity.DataContext.Models
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<ResetAuthenticator> Logger
+
+<PageTitle>Сброс ключа аутентификатора</PageTitle>
+
+<StatusMessage Message="@message" />
+<h3>Сброс ключа аутентификатора</h3>
+<div class="alert alert-warning" role="alert">
+    <p>
+        <span class="glyphicon glyphicon-warning-sign"></span>
+        <strong>Если вы сбросите ключ аутентификатора, приложение-аутентификатор не будет работать, пока вы не настроите его заново.</strong>
+    </p>
+    <p>
+        В ходе этого процесса 2FA отключается, пока вы не подтвердите приложение-аутентификатор.
+        Если вы не завершите настройку приложения-аутентификатора, вы можете потерять доступ к своей учётной записи.
+    </p>
+</div>
+<div>
+    <form @formname="reset-authenticator" @onsubmit="OnSubmitAsync" method="post">
+        <button class="btn btn-danger" type="submit">Сбросить ключ аутентификатора</button>
+    </form>
+</div>
+
+@code {
+    private string? message;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromTempData(Name = IdentityRedirectManager.StatusMessageKey)]
+    private string? IdentityStatusMessage { get; set; }
+
+    protected override void OnInitialized()
+    {
+        message = IdentityStatusMessage;
+        IdentityStatusMessage = null;
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
+        }
+
+        await UserManager.SetTwoFactorEnabledAsync(user, false);
+        await UserManager.ResetAuthenticatorKeyAsync(user);
+        var userId = await UserManager.GetUserIdAsync(user);
+        Logger.LogInformation("Пользователь с идентификатором '{UserId}' сбросил ключ приложения-аутентификатора.", userId);
+
+        await SignInManager.RefreshSignInAsync(user);
+
+        IdentityStatusMessage = "Ключ приложения-аутентификатора сброшен. Вам потребуется настроить приложение-аутентификатор с помощью нового ключа.";
+        RedirectManager.RedirectTo("Account/Manage/EnableAuthenticator");
+    }
+}

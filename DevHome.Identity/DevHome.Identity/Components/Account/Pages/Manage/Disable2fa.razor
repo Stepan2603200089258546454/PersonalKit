@@ -1,0 +1,78 @@
+﻿@page "/Account/Manage/Disable2fa"
+
+@using Microsoft.AspNetCore.Identity
+@using DevHome.Identity.DataContext.Models
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<Disable2fa> Logger
+
+<PageTitle>Отключение двухфакторной аутентификации (2FA)</PageTitle>
+
+<StatusMessage Message="@message" />
+<h3>Отключение двухфакторной аутентификации (2FA)</h3>
+
+<div class="alert alert-warning" role="alert">
+    <p>
+        <strong>Это действие только отключает 2FA.</strong>
+    </p>
+    <p>
+        Отключение 2FA не изменяет ключи, используемые в приложениях-аутентификаторах. Если вы хотите изменить ключ,
+        используемый в приложении-аутентификаторе, <a href="Account/Manage/ResetAuthenticator">сбросьте ключи аутентификатора.</a>
+    </p>
+</div>
+
+<div>
+    <form @formname="disable-2fa" @onsubmit="OnSubmitAsync" method="post">
+        <button class="btn btn-danger" type="submit">Отключить 2FA</button>
+    </form>
+</div>
+
+@code {
+    private string? message;
+    private ApplicationUser? user;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromTempData(Name = IdentityRedirectManager.StatusMessageKey)]
+    private string? IdentityStatusMessage { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        message = IdentityStatusMessage;
+        IdentityStatusMessage = null;
+
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
+        }
+
+        if (HttpMethods.IsGet(HttpContext.Request.Method) && !await UserManager.GetTwoFactorEnabledAsync(user))
+        {
+            throw new InvalidOperationException("Нельзя отключить 2FA: у пользователя она не включена.");
+        }
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
+        }
+
+        var disable2faResult = await UserManager.SetTwoFactorEnabledAsync(user, false);
+        if (!disable2faResult.Succeeded)
+        {
+            throw new InvalidOperationException("При отключении 2FA произошла непредвиденная ошибка.");
+        }
+
+        var userId = await UserManager.GetUserIdAsync(user);
+        Logger.LogInformation("Пользователь с идентификатором '{UserId}' отключил 2FA.", userId);
+        IdentityStatusMessage = "2FA отключена. Вы сможете снова включить 2FA, когда настроите приложение-аутентификатор.";
+        RedirectManager.RedirectTo("Account/Manage/TwoFactorAuthentication");
+    }
+}

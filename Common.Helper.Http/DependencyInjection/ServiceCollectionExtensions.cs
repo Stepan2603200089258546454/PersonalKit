@@ -101,14 +101,21 @@ public static class ServiceCollectionExtensions
         string sectionName,
         Action<ResilientHttpClientOptions>? configure)
     {
+        var section = configuration.GetSection(sectionName);
         var optionsBuilder = services.AddOptions<ResilientHttpClientOptions>(clientName);
+
+        // Отсутствующие в конфигурации разделы устойчивости не применяются.
+        // Делегат выполняется при каждом создании параметров, поэтому горячая
+        // перезагрузка пересчитывает наличие разделов.
+        optionsBuilder.Configure(options =>
+            ResilienceSectionPresence.Apply(options, section.GetSection("Resilience")));
 
         if (configure is not null)
         {
             optionsBuilder.Configure(configure);
         }
 
-        optionsBuilder.Bind(configuration.GetSection(sectionName));
+        optionsBuilder.Bind(section);
 
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<ResilientHttpClientOptions>, ResilientHttpClientOptionsValidator>());

@@ -1,0 +1,75 @@
+﻿@page "/Account/ConfirmEmailChange"
+
+@using System.Text
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using DevHome.Identity.DataContext.Models
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Подтверждение изменения адреса электронной почты</PageTitle>
+
+<h1>Подтверждение изменения адреса электронной почты</h1>
+
+<StatusMessage Message="@message" />
+
+@code {
+    private string? message;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromTempData(Name = IdentityRedirectManager.StatusMessageKey)]
+    private string? IdentityStatusMessage { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? UserId { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? Email { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? Code { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        message = IdentityStatusMessage;
+        IdentityStatusMessage = null;
+
+        if (UserId is null || Email is null || Code is null)
+        {
+            IdentityStatusMessage = "Ошибка: неверная ссылка подтверждения изменения адреса электронной почты.";
+            RedirectManager.RedirectTo("Account/Login");
+            return;
+        }
+
+        var user = await UserManager.FindByIdAsync(UserId);
+        if (user is null)
+        {
+            message = $"Ошибка: не удалось найти пользователя с идентификатором «{UserId}»";
+            return;
+        }
+
+        var code = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(Code));
+        var result = await UserManager.ChangeEmailAsync(user, Email, code);
+        if (!result.Succeeded)
+        {
+            message = "Ошибка изменения адреса электронной почты.";
+            return;
+        }
+
+        // В нашем интерфейсе адрес электронной почты и имя пользователя совпадают,
+        // поэтому при изменении адреса обновляем и имя пользователя.
+        var setUserNameResult = await UserManager.SetUserNameAsync(user, Email);
+        if (!setUserNameResult.Succeeded)
+        {
+            message = "Ошибка изменения имени пользователя.";
+            return;
+        }
+
+        await SignInManager.RefreshSignInAsync(user);
+        message = "Спасибо за подтверждение изменения адреса электронной почты.";
+    }
+}

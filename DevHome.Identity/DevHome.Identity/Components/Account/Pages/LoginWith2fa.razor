@@ -1,0 +1,105 @@
+﻿@page "/Account/LoginWith2fa"
+
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using DevHome.Identity.DataContext.Models
+
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<LoginWith2fa> Logger
+
+<PageTitle>Двухфакторная аутентификация</PageTitle>
+
+<h1>Двухфакторная аутентификация</h1>
+<hr />
+<StatusMessage Message="@message" />
+<p>Ваш вход защищён приложением-аутентификатором. Введите ниже код из этого приложения.</p>
+<div class="row">
+    <div class="col-md-4">
+        <EditForm Model="Input" FormName="login-with-2fa" OnValidSubmit="OnValidSubmitAsync" method="post">
+            <input type="hidden" name="ReturnUrl" value="@ReturnUrl" />
+            <input type="hidden" name="RememberMe" value="@RememberMe" />
+            <DataAnnotationsValidator />
+            <div role="alert" aria-atomic="true">
+                <ValidationSummary class="text-danger" />
+            </div>
+            <div class="form-floating mb-3">
+                <InputText @bind-Value="Input.TwoFactorCode" id="Input.TwoFactorCode" class="form-control" autocomplete="off" />
+                <label for="Input.TwoFactorCode" class="form-label">Код аутентификатора</label>
+                <ValidationMessage For="() => Input.TwoFactorCode" class="text-danger" />
+            </div>
+            <div class="checkbox mb-3">
+                <label class="form-label">
+                    <InputCheckbox @bind-Value="Input.RememberMachine" />
+                    Запомнить это устройство
+                </label>
+            </div>
+            <div>
+                <button type="submit" class="w-100 btn btn-lg btn-primary">Войти</button>
+            </div>
+        </EditForm>
+    </div>
+</div>
+<p>
+    Нет доступа к устройству с приложением-аутентификатором? Вы можете
+    <a href="Account/LoginWithRecoveryCode?ReturnUrl=@ReturnUrl">войти с помощью кода восстановления</a>.
+</p>
+
+@code {
+    private string? message;
+    private ApplicationUser user = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery]
+    private bool RememberMe { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+
+        // Убеждаемся, что пользователь уже прошёл шаг ввода имени и пароля.
+        user = await SignInManager.GetTwoFactorAuthenticationUserAsync() ??
+            throw new InvalidOperationException("Не удалось загрузить пользователя для двухфакторной аутентификации.");
+    }
+
+    private async Task OnValidSubmitAsync()
+    {
+        var authenticatorCode = Input.TwoFactorCode!.Replace(" ", string.Empty).Replace("-", string.Empty);
+        var result = await SignInManager.TwoFactorAuthenticatorSignInAsync(authenticatorCode, RememberMe, Input.RememberMachine);
+        var userId = await UserManager.GetUserIdAsync(user);
+
+        if (result.Succeeded)
+        {
+            Logger.LogInformation("Пользователь с идентификатором '{UserId}' вошёл с двухфакторной аутентификацией.", userId);
+            RedirectManager.RedirectTo(ReturnUrl);
+        }
+        else if (result.IsLockedOut)
+        {
+            Logger.LogWarning("Учётная запись пользователя с идентификатором '{UserId}' заблокирована.", userId);
+            RedirectManager.RedirectTo("Account/Lockout");
+        }
+        else
+        {
+            Logger.LogWarning("Введён неверный код аутентификатора для пользователя с идентификатором '{UserId}'.", userId);
+            message = "Ошибка: неверный код аутентификатора.";
+        }
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [StringLength(7, ErrorMessage = "Длина поля «{0}» должна составлять не менее {2} и не более {1} символов.", MinimumLength = 6)]
+        [DataType(DataType.Text)]
+        [Display(Name = "Код аутентификатора")]
+        public string? TwoFactorCode { get; set; }
+
+        [Display(Name = "Запомнить это устройство")]
+        public bool RememberMachine { get; set; }
+    }
+}
