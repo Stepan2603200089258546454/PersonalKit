@@ -62,26 +62,93 @@
     }
 
     function updateSwitchers(selected) {
+        var text = labels[selected] || 'Тема';
+        var iconClass = 'bi ' + (icons[selected] || 'bi-circle-half');
+
         document.querySelectorAll('[data-cui-theme]').forEach(function (root) {
             root.querySelectorAll('[data-cui-theme-value]').forEach(function (item) {
-                var value = item.getAttribute('data-cui-theme-value');
-                var active = value === selected;
+                var active = item.getAttribute('data-cui-theme-value') === selected;
+                var checked = active ? 'true' : 'false';
 
                 item.classList.toggle('active', active);
-                item.setAttribute('aria-checked', active ? 'true' : 'false');
+
+                if (item.getAttribute('aria-checked') !== checked) {
+                    item.setAttribute('aria-checked', checked);
+                }
             });
 
             var label = root.querySelector('[data-cui-theme-label]');
 
-            if (label) {
-                label.textContent = labels[selected] || 'Тема';
+            // Пишем только при отличии: иначе наблюдатель за DOM
+            // зациклился бы на собственных изменениях.
+            if (label && label.textContent !== text) {
+                label.textContent = text;
             }
 
             var icon = root.querySelector('[data-cui-theme-icon]');
 
-            if (icon) {
-                icon.className = 'bi ' + (icons[selected] || 'bi-circle-half');
+            if (icon && icon.className !== iconClass) {
+                icon.className = iconClass;
             }
+        });
+    }
+
+    /* ===============================
+       Восстановление разметки после навигации
+       =============================== */
+
+    var refreshScheduled = false;
+
+    function scheduleRefresh() {
+        if (refreshScheduled) {
+            return;
+        }
+
+        refreshScheduled = true;
+
+        window.setTimeout(function () {
+            refreshScheduled = false;
+            refresh();
+        }, 0);
+    }
+
+    // При усиленной навигации Blazor подставляет серверную разметку верхней
+    // панели: подпись и иконка переключателя возвращаются к значениям по
+    // умолчанию. Наблюдаем за DOM и возвращаем выбранную тему.
+    function startSwitcherObserver() {
+        if (typeof MutationObserver === 'undefined' || !document.body) {
+            return;
+        }
+
+        var observer = new MutationObserver(function (mutations) {
+            for (var i = 0; i < mutations.length; i++) {
+                var mutation = mutations[i];
+                var target = mutation.target;
+                var element = target instanceof Element ? target : target.parentElement;
+
+                if (element && element.closest('[data-cui-theme]')) {
+                    scheduleRefresh();
+                    return;
+                }
+
+                var added = mutation.addedNodes;
+
+                for (var j = 0; j < added.length; j++) {
+                    var node = added[j];
+
+                    if (node instanceof Element &&
+                        (node.matches('[data-cui-theme]') || node.querySelector('[data-cui-theme]'))) {
+                        scheduleRefresh();
+                        return;
+                    }
+                }
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            characterData: true
         });
     }
 
@@ -177,8 +244,12 @@
     };
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', refresh, { once: true });
+        document.addEventListener('DOMContentLoaded', function () {
+            refresh();
+            startSwitcherObserver();
+        }, { once: true });
     } else {
         refresh();
+        startSwitcherObserver();
     }
 })();

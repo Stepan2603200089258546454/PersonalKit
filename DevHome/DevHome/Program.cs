@@ -25,6 +25,7 @@ builder.Services.AddCommonUi(options =>
     options.HomeUrl = "";
     options.LoginUrl = "login";
     options.LogoutUrl = "logout";
+    //options.ProfileUrl = "https://localhost:7163/Account/Manage";
     // Вход и выход DevHome обслуживают обработчики /login и /logout.
     options.LogoutUsePost = false;
     options.AddAssembly(typeof(Program).Assembly);
