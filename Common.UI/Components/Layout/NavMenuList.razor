@@ -1,0 +1,109 @@
+@* Список разделов и пунктов меню. Используется и в постоянной панели, и в offcanvas.
+   Видимость пунктов проверяется здесь, поэтому заголовок раздела не выводится,
+   если все его пункты скрыты от текущего пользователя.
+   Раздел сворачивается и разворачивается кнопкой-заголовком; состояние хранит
+   NavigationMenu.js, чтобы оно сохранялось между переходами. *@
+<ul class="nav nav-pills flex-column gap-1 mb-0">
+    @for (var index = 0; index < visibleSections.Count; index++)
+    {
+        var section = visibleSections[index];
+
+        if (string.IsNullOrWhiteSpace(section.Title))
+        {
+            @foreach (var page in section.Items)
+            {
+                <NavMenuItem Page="page" CurrentUrl="@CurrentUrl" />
+            }
+        }
+        else
+        {
+            var collapseId = $"{listId}-{index}";
+
+            <li class="cui-menu-section">
+                <button type="button"
+                        class="cui-section-toggle"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#@collapseId"
+                        aria-expanded="true"
+                        aria-controls="@collapseId"
+                        title="@section.Title">
+                    <span class="text-truncate">@section.Title</span>
+                    <i class="bi bi-chevron-down cui-section-caret" aria-hidden="true"></i>
+                </button>
+
+                <div class="collapse show" id="@collapseId" data-cui-section-key="@section.Title">
+                    <ul class="nav nav-pills flex-column gap-1">
+                        @foreach (var page in section.Items)
+                        {
+                            <NavMenuItem Page="page" CurrentUrl="@CurrentUrl" />
+                        }
+                    </ul>
+                </div>
+            </li>
+        }
+    }
+</ul>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<MenuSection> Sections { get; set; } = [];
+
+    [Parameter]
+    public string CurrentUrl { get; set; } = string.Empty;
+
+    // Идентификаторы блоков collapse должны быть уникальны на странице:
+    // меню выводится дважды (постоянная панель и offcanvas).
+    private readonly string listId = $"cui-menu-{Guid.NewGuid():N}";
+
+    private IReadOnlyList<MenuSection> visibleSections = [];
+    private ClaimsPrincipal? user;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Состояние входа нужно, чтобы скрыть пункты с ролями и разделы без видимых пунктов.
+        if (AuthenticationStateTask is not null)
+        {
+            user = (await AuthenticationStateTask).User;
+        }
+
+        RebuildVisibleSections();
+    }
+
+    private void RebuildVisibleSections()
+    {
+        var result = new List<MenuSection>();
+
+        foreach (var section in Sections)
+        {
+            var items = section.Items.Where(IsVisible).ToList();
+
+            if (items.Count > 0)
+            {
+                result.Add(new MenuSection { Title = section.Title, Items = items });
+            }
+        }
+
+        visibleSections = result;
+    }
+
+    private bool IsVisible(MenuPage page)
+    {
+        var roles = page.Roles?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (roles is { Length: > 0 })
+        {
+            // Достаточно любой из перечисленных ролей — так же работает AuthorizeView.
+            return user?.Identity?.IsAuthenticated == true && roles.Any(user.IsInRole);
+        }
+
+        if (page.RequiresAuthorization)
+        {
+            return user?.Identity?.IsAuthenticated == true;
+        }
+
+        return true;
+    }
+}

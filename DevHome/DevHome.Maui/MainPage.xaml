@@ -1,0 +1,11 @@
+﻿<ContentPage xmlns:local="clr-namespace:DevHome.Maui"
+             xmlns:components="clr-namespace:DevHome.Maui.Components"
+             x:Class="DevHome.Maui.MainPage">
+
+    <BlazorWebView x:Name="blazorWebView" HostPage="wwwroot/index.html">
+        <BlazorWebView.RootComponents>
+            <RootComponent Selector="#app" ComponentType="{x:Type components:Routes}" />
+        </BlazorWebView.RootComponents>
+    </BlazorWebView>
+
+</ContentPage>

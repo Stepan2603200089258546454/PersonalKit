@@ -1,9 +1,10 @@
-﻿@page "/counter"
+@page "/counter"
+@attribute [MenuItem("Счётчик", Description = "Пример интерактивной страницы Blazor WebAssembly", Section = "Разделы", Icon = "bi bi-plus-square", Order = 20)]
 @rendermode InteractiveAuto
 
 <PageTitle>Счётчик</PageTitle>
 
-<h1>Счётчик</h1>
+<h1 class="h3 mb-3">Счётчик</h1>
 
 <p role="status">Текущее значение: @currentCount</p>
 

@@ -1,14 +1,19 @@
-﻿@page "/auth"
+@page "/auth"
 
 @using Microsoft.AspNetCore.Authorization
 
 @attribute [Authorize]
+@attribute [MenuItem("Требуется авторизация", Description = "Страница только для вошедших пользователей", Section = "Доступ", Icon = "bi bi-shield-lock", Order = 40, RequiresAuthorization = true)]
 @rendermode InteractiveAuto
 
 <PageTitle>Авторизация</PageTitle>
 
-<h1>Вы прошли проверку подлинности</h1>
+<h1 class="h3 mb-3">Вы прошли проверку подлинности</h1>
 
 <AuthorizeView>
-    Здравствуйте, @context.User.Identity?.Name!
+    <Authorized Context="auth">
+        <div class="alert alert-success" role="status">
+            Здравствуйте, @auth.User.Identity?.Name!
+        </div>
+    </Authorized>
 </AuthorizeView>

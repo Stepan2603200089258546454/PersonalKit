@@ -16,3 +16,6 @@
 - `README.md` — этот файл.
 - `http-client-template.md` — шаблон типизированного HTTP-клиента с горячей перезагрузкой:
   регистрация в DI, формат `appsettings.json`, поведение таймаутов, повторов и предохранителя.
+- `devhome-oauth.md` — вход в DevHome через DevHome.Identity: сценарии, клиенты, запуск.
+- `openiddict-reference.md` — настройки и функции OpenIddict: что за что отвечает.
+- `common-ui.md` — библиотека компонентов `Common.UI`: меню, темы, атрибуты страниц.

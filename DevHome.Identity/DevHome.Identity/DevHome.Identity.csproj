@@ -11,10 +11,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Common.UI\Common.UI.csproj" />
     <ProjectReference Include="..\..\DevHome.Identity.DataContext\DevHome.Identity.DataContext.csproj" />
     <ProjectReference Include="..\DevHome.Identity.Client\DevHome.Identity.Client.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
+    <PackageReference Include="OpenIddict.AspNetCore" />
   </ItemGroup>
 
 </Project>

@@ -1,4 +1,4 @@
-﻿using Common.Helper.DataBase.Settings;
+using Common.Helper.DataBase.Settings;
 using Common.Helper.Options;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -18,7 +18,7 @@ namespace Common.Helper.DataBase
         /// <summary>
         /// Добавить и сконфигурировать контекс БД
         /// </summary>
-        public static void AddDBContext<TContext>(IServiceCollection services) where TContext : DbContext
+        public static void AddDBContext<TContext>(IServiceCollection services, Action<DbContextOptionsBuilder>? configure = null) where TContext : DbContext
         {
             PostgreSettings dbOptions = services
                 .BuildServiceProvider()
@@ -38,10 +38,14 @@ namespace Common.Helper.DataBase
                 {
                     npgsqlOptions.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
                     npgsqlOptions.SetPostgresVersion(Version.Parse(opt.Version));
-                })
-                    .LogTo(Console.WriteLine, LogLevel.Information)
-                    .EnableSensitiveDataLogging()
-                    .EnableDetailedErrors();
+                });
+
+                configure?.Invoke(options);
+
+                //options
+                //    .LogTo(Console.WriteLine, LogLevel.Information)
+                //    .EnableSensitiveDataLogging()
+                //    .EnableDetailedErrors();
             }, poolSize: dbOptions?.PoolSize ?? 1024);
         }
     }

@@ -1,0 +1,60 @@
+@page "/"
+@inject DevHome.Maui.Services.AuthenticationService Authentication
+
+<PageTitle>Главная</PageTitle>
+
+<h1>DevHome</h1>
+
+@if (Authentication.IsSignedIn)
+{
+    <p>Вы вошли через DevHome.Identity.</p>
+
+    <table class="table">
+        <tbody>
+            @foreach (var claim in Authentication.User!.Claims)
+            {
+                <tr>
+                    <th>@claim.Type</th>
+                    <td>@claim.Value</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <p>Токен действует до: @Authentication.AccessTokenExpiration?.ToLocalTime().ToString("g")</p>
+
+    <button class="btn btn-secondary" @onclick="Logout">Выйти</button>
+}
+else
+{
+    <p>Войдите, чтобы получить доступ к приложению.</p>
+    <button class="btn btn-primary" @onclick="Login" disabled="@isBusy">
+        @(isBusy ? "Вход…" : "Войти через DevHome.Identity")
+    </button>
+
+    @if (!string.IsNullOrEmpty(Authentication.Error))
+    {
+        <div class="alert alert-danger" role="alert">
+            Ошибка входа: @Authentication.Error
+        </div>
+    }
+}
+
+@code {
+    private bool isBusy;
+
+    private async Task Login()
+    {
+        isBusy = true;
+        try
+        {
+            await Authentication.LoginAsync();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void Logout() => Authentication.Logout();
+}

@@ -1,11 +1,12 @@
 @page "/weather"
+@attribute [MenuItem("Погода", Description = "Пример потоковой отрисовки данных", Section = "Разделы", Icon = "bi bi-cloud-sun", Order = 30)]
 @attribute [StreamRendering]
 
 <PageTitle>Погода</PageTitle>
 
-<h1>Погода</h1>
+<h1 class="h3 mb-3">Погода</h1>
 
-<p>Этот компонент демонстрирует отображение данных.</p>
+<p class="text-body-secondary">Этот компонент демонстрирует отображение данных.</p>
 
 @if (Forecasts is null)
 {
@@ -13,27 +14,29 @@
 }
 else
 {
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Дата</th>
-                <th aria-label="Температура в градусах Цельсия">Темп. (°C)</th>
-                <th aria-label="Температура в градусах Фаренгейта">Темп. (°F)</th>
-                <th>Сводка</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var forecast in Forecasts)
-            {
+    <div class="table-responsive">
+        <table class="table table-striped table-hover align-middle">
+            <thead>
                 <tr>
-                    <td>@forecast.Date.ToShortDateString()</td>
-                    <td>@forecast.TemperatureC</td>
-                    <td>@forecast.TemperatureF</td>
-                    <td>@forecast.Summary</td>
+                    <th>Дата</th>
+                    <th aria-label="Температура в градусах Цельсия">Темп. (°C)</th>
+                    <th aria-label="Температура в градусах Фаренгейта">Темп. (°F)</th>
+                    <th>Сводка</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var forecast in Forecasts)
+                {
+                    <tr>
+                        <td>@forecast.Date.ToShortDateString()</td>
+                        <td>@forecast.TemperatureC</td>
+                        <td>@forecast.TemperatureF</td>
+                        <td>@forecast.Summary</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }
 
 @code {

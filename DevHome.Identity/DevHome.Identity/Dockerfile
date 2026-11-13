@@ -14,7 +14,11 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["Directory.Packages.props","."]
 COPY ["Directory.Build.props","."]
+COPY ["Common.UI/Common.UI.csproj","Common.UI/"]
 COPY ["DevHome.Identity/DevHome.Identity/DevHome.Identity.csproj","DevHome.Identity/DevHome.Identity/"]
+COPY ["DevHome.Identity.DataContext/DevHome.Identity.DataContext.csproj","DevHome.Identity.DataContext/"]
+COPY ["Common.Helper.DataBase/Common.Helper.DataBase.csproj","Common.Helper.DataBase/"]
+COPY ["Common.Helper.Options/Common.Helper.Options.csproj","Common.Helper.Options/"]
 COPY ["DevHome.Identity/DevHome.Identity.Client/DevHome.Identity.Client.csproj","DevHome.Identity/DevHome.Identity.Client/"]
 RUN dotnet restore "./DevHome.Identity/DevHome.Identity/DevHome.Identity.csproj"
 COPY . .

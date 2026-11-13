@@ -1,0 +1,48 @@
+@* Компонент сам подключает стили и скрипты библиотеки, поэтому его можно
+   использовать и без NavigationMenu. Сам переключатель — обычный dropdown Bootstrap. *@
+<CommonUiAssets />
+
+<div class="dropdown" data-cui-theme>
+    <button type="button"
+            class="btn btn-outline-secondary btn-sm dropdown-toggle d-flex align-items-center gap-2"
+            data-bs-toggle="dropdown"
+            aria-expanded="false"
+            aria-label="Выбор темы">
+        <i class="bi bi-circle-half" data-cui-theme-icon aria-hidden="true"></i>
+        <span class="d-none d-md-inline" data-cui-theme-label>Тема</span>
+    </button>
+
+    <ul class="dropdown-menu dropdown-menu-end">
+        <li>
+            <button type="button" class="dropdown-item" data-cui-theme-value="light" role="menuitemradio">
+                <i class="bi bi-sun-fill me-2" aria-hidden="true"></i>Светлая
+            </button>
+        </li>
+        <li>
+            <button type="button" class="dropdown-item" data-cui-theme-value="dark" role="menuitemradio">
+                <i class="bi bi-moon-stars-fill me-2" aria-hidden="true"></i>Тёмная
+            </button>
+        </li>
+        <li>
+            <button type="button" class="dropdown-item" data-cui-theme-value="auto" role="menuitemradio">
+                <i class="bi bi-circle-half me-2" aria-hidden="true"></i>Системная
+            </button>
+        </li>
+    </ul>
+</div>
+
+@code {
+    private bool rendered;
+
+    // Внешний вид переключателя обновляет скрипт, поэтому повторный рендер
+    // компонента затёр бы выставленные им классы и текст.
+    protected override bool ShouldRender() => !rendered;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            rendered = true;
+        }
+    }
+}

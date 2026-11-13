@@ -1,0 +1,61 @@
+@* Боковая панель: на десктопе постоянная, на мобильном — offcanvas Bootstrap. *@
+<aside class="cui-sidebar d-none d-lg-flex flex-column bg-body">
+    <a class="cui-sidebar-brand d-flex align-items-center gap-2 px-3 text-body text-decoration-none"
+       href="@Options.HomeUrl"
+       title="@Options.ApplicationName">
+        <span class="cui-sidebar-brand-icon d-flex align-items-center justify-content-center flex-shrink-0 border rounded-3 bg-body-secondary">
+            <i class="@Options.ApplicationIcon" aria-hidden="true"></i>
+        </span>
+        <span class="cui-sidebar-text fw-semibold text-truncate">@Options.ApplicationName</span>
+    </a>
+
+    <nav class="cui-sidebar-nav flex-grow-1 overflow-auto p-2" aria-label="Боковая навигация">
+        <NavMenuList Sections="Sections" CurrentUrl="@CurrentUrl" />
+    </nav>
+
+    @* Разделитель отступает от краёв, а не тянется во всю ширину панели. *@
+    <hr class="cui-sidebar-divider mx-3 my-0" />
+
+    <div class="cui-sidebar-footer p-2">
+        <button type="button"
+                class="cui-sidebar-toggle btn btn-link text-body text-decoration-none rounded w-100 d-flex align-items-center justify-content-center gap-2"
+                data-cui-sidebar-toggle
+                title="Свернуть или развернуть боковую панель">
+            <i class="bi bi-chevron-double-left" aria-hidden="true"></i>
+            <span class="cui-sidebar-text small">Свернуть</span>
+        </button>
+    </div>
+</aside>
+
+<div class="offcanvas offcanvas-start d-lg-none"
+     tabindex="-1"
+     id="@SidebarId"
+     aria-labelledby="@(SidebarId + "-title")">
+    <div class="offcanvas-header">
+        <h5 class="offcanvas-title d-flex align-items-center gap-2" id="@(SidebarId + "-title")">
+            <i class="@Options.ApplicationIcon" aria-hidden="true"></i>
+            @Options.ApplicationName
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Закрыть меню"></button>
+    </div>
+    <hr class="cui-sidebar-divider mx-3 my-0">
+    <div class="offcanvas-body p-2">
+        <nav aria-label="Боковая навигация">
+            <NavMenuList Sections="Sections" CurrentUrl="@CurrentUrl" />
+        </nav>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<MenuSection> Sections { get; set; } = [];
+
+    [Parameter]
+    public string CurrentUrl { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public NavigationMenuOptions Options { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public string SidebarId { get; set; } = string.Empty;
+}

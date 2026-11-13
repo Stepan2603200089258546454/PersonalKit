@@ -1,0 +1,14 @@
+@* Пункт меню. Видимость пункта уже проверена в NavMenuList. *@
+<li class="nav-item">
+    <NavMenuItemLink Page="Page" Active="IsActive" />
+</li>
+
+@code {
+    [Parameter, EditorRequired]
+    public MenuPage Page { get; set; } = default!;
+
+    [Parameter]
+    public string CurrentUrl { get; set; } = string.Empty;
+
+    private bool IsActive => Page.IsCurrent(CurrentUrl);
+}

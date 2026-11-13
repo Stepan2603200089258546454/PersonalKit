@@ -4,7 +4,7 @@
     <!-- Единый каталог сборки для всех проектов решения.
          В песочнице DSH запись в obj/bin существующих проектов запрещена,
          поэтому результаты сборки складываются в artifacts/ в корне рабочей области. -->
-    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <UseArtifactsOutput>false</UseArtifactsOutput>
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
   </PropertyGroup>
 

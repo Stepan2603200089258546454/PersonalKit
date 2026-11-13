@@ -1,0 +1,45 @@
+/* ===================================================
+   Common.UI / Базовые стили приложения
+   Подключаются один раз в App.razor.
+   Оформление Bootstrap (bootstrap.min.css и bootstrap-icons)
+   приложение подключает само — библиотека их не заменяет.
+   =================================================== */
+
+html,
+body {
+    height: 100%;
+}
+
+body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+/* Скроллбар в цветах текущей темы Bootstrap. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--bs-secondary-color) transparent;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: var(--bs-secondary-bg);
+    border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--bs-secondary-color);
+}
+
+/* Контент выезжающих панелей не «прыгает» при появлении скроллбара. */
+.cui-scroll {
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}

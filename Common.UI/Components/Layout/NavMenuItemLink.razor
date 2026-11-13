@@ -1,0 +1,24 @@
+@* Ссылка пункта меню. Отдельный компонент, чтобы разметка не дублировалась
+   в ветках «доступен всем» и «доступен по роли».
+   Активный пункт получает класс active, а его оформление задано в
+   NavigationMenu.css: приглушённый фон и рамка вместо яркой заливки nav-pills. *@
+<a class="cui-nav-link nav-link d-flex align-items-center gap-2 rounded @(Active ? "active" : null)"
+   href="@Page.Url"
+   target="@(Page.OpenInNewTab ? "_blank" : null)"
+   rel="@(Page.OpenInNewTab ? "noopener" : null)"
+   aria-current="@(Active ? "page" : null)">
+    @if (!string.IsNullOrWhiteSpace(Page.Icon))
+    {
+        <i class="@Page.Icon cui-nav-icon flex-shrink-0" aria-hidden="true"></i>
+    }
+
+    <span class="cui-sidebar-text text-truncate">@Page.Title</span>
+</a>
+
+@code {
+    [Parameter, EditorRequired]
+    public MenuPage Page { get; set; } = default!;
+
+    [Parameter]
+    public bool Active { get; set; }
+}

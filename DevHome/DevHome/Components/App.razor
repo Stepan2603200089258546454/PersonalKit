@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru" data-bs-theme="@Theme">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <BasePath />
+    <ResourcePreloader />
+    @* Bootstrap и Bootstrap Icons — обязательные зависимости библиотеки Common.UI.
+       Стили и скрипты самой библиотеки компоненты подключают сами. *@
+    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
+    <link rel="stylesheet" href="@Assets["lib/bootstrap-icons/font/bootstrap-icons.min.css"]" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["DevHome.styles.css"]" />
+    <ImportMap />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet />
+</head>
+
+<body class="h-100">
+    <CascadingAuthenticationState>
+        <Routes />
+    </CascadingAuthenticationState>
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="@Assets["lib/bootstrap/dist/js/bootstrap.bundle.min.js"]"></script>
+</body>
+
+</html>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    // Тему в cookie пишет theme-switcher.js. Сервер отдаёт в разметке уже
+    // выбранную тему: иначе усиленная навигация Blazor (в том числе переход
+    // на WASM-страницы) вернула бы светлую тему из серверного HTML.
+    private string Theme => HttpContext?.Request.Cookies["cui.theme"] switch
+    {
+        "dark" => "dark",
+        "light" => "light",
+        _ => "light"
+    };
+}

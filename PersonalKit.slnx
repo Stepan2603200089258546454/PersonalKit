@@ -1,14 +1,24 @@
-﻿<Solution>
+<Solution>
   <Folder Name="/Applications/" />
   <Folder Name="/Applications/Identity/">
     <Project Path="DevHome.Identity.DataContext/DevHome.Identity.DataContext.csproj" Id="69df1329-478c-47bd-8ef0-22a8e2bc6d37" />
     <Project Path="DevHome.Identity/DevHome.Identity.Client/DevHome.Identity.Client.csproj" Id="c7d972f1-7655-4d66-b660-2f439422a800" />
     <Project Path="DevHome.Identity/DevHome.Identity/DevHome.Identity.csproj" Id="1c2845a8-da31-4148-aa7e-dd05a301730c" />
   </Folder>
+  <Folder Name="/Applications/IdentityTemplate/">
+    <Project Path="DevHome/DevHome.Cli/DevHome.Cli.csproj" />
+    <Project Path="DevHome/DevHome.Maui/DevHome.Maui.csproj" />
+    <Project Path="DevHome/DevHome.Wpf/DevHome.Wpf.csproj" />
+  </Folder>
+  <Folder Name="/Applications/Main/">
+    <Project Path="DevHome/DevHome.Client/DevHome.Client.csproj" Id="4c2305af-25a0-4097-b18e-7918bfba32db" />
+    <Project Path="DevHome/DevHome/DevHome.csproj" Id="7b34ba87-4cbc-42b2-be54-8578c0ca2f62" />
+  </Folder>
   <Folder Name="/Common/">
     <Project Path="Common.Helper.DataBase/Common.Helper.DataBase.csproj" Id="17cc7641-7bd0-4822-ba45-42e030c59f81" />
     <Project Path="Common.Helper.Http/Common.Helper.Http.csproj" />
     <Project Path="Common.Helper.Options/Common.Helper.Options.csproj" Id="c5254917-0e76-4d56-82fc-744c4ef6b3aa" />
+    <Project Path="Common.UI/Common.UI.csproj" />
   </Folder>
   <Folder Name="/Common/Testing/">
     <Project Path="Testing/Common.Helper.Http.Tests.csproj" />
@@ -22,7 +32,10 @@
     <File Path="Directory.Packages.props" />
   </Folder>
   <Folder Name="/AgentsDocs/">
+    <File Path="AgentsDocs/common-ui.md" />
+    <File Path="AgentsDocs/devhome-oauth.md" />
     <File Path="AgentsDocs/http-client-template.md" />
+    <File Path="AgentsDocs/openiddict-reference.md" />
     <File Path="AgentsDocs/README.md" />
   </Folder>
   <Folder Name="/AgentsTools/">

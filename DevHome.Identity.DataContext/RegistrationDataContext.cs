@@ -1,12 +1,13 @@
-﻿using Common.Helper.DataBase;
+using Common.Helper.DataBase;
 using DevHome.Identity.DataContext.Context;
 using DevHome.Identity.DataContext.Models;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using System;
-using System.Collections.Generic;
-using System.Text;
+using OpenIddict.Abstractions;
+using OpenIddict.EntityFrameworkCore;
+using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace DevHome.Identity.DataContext;
 
@@ -15,7 +16,12 @@ public static class RegistrationDataContext
     public static void AddIdentity(IServiceCollection services, IConfiguration configuration)
     {
         RegistrationPostgreSQL.AddDBSettings(services, configuration);
-        RegistrationPostgreSQL.AddDBContext<DBContext>(services);
+        RegistrationPostgreSQL.AddDBContext<DBContext>(services, options => options.UseOpenIddict());
+
+        // OpenIddict core и ASP.NET Core Identity получают контекст из DI, поэтому
+        // дополнительно регистрируем scoped-экземпляр поверх пула фабрик.
+        services.AddScoped<DBContext>(provider =>
+            provider.GetRequiredService<IDbContextFactory<DBContext>>().CreateDbContext());
 
         services.AddDatabaseDeveloperPageExceptionFilter();
 

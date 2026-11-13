@@ -1,0 +1,54 @@
+@page "/"
+@attribute [MenuItem("Главная", Description = "Вход в DevHome через DevHome.Identity", Section = "Разделы", Icon = "bi bi-house-door", Order = 10)]
+@using Microsoft.AspNetCore.Components.Authorization
+
+<PageTitle>Главная</PageTitle>
+
+<h1 class="h3 mb-3">Главная</h1>
+
+<AuthorizeView>
+    <Authorized Context="auth">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="h5 card-title">Здравствуйте, @auth.User.Identity?.Name!</h2>
+                <p class="card-text text-body-secondary mb-0">
+                    Вы вошли в DevHome через DevHome.Identity.
+                </p>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header fw-semibold">Утверждения пользователя</div>
+            <div class="table-responsive">
+                <table class="table table-sm table-striped align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th scope="col">Тип</th>
+                            <th scope="col">Значение</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var claim in auth.User.Claims)
+                        {
+                            <tr>
+                                <td class="text-body-secondary">@claim.Type</td>
+                                <td>@claim.Value</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <div class="card">
+            <div class="card-body">
+                <h2 class="h5 card-title">Добро пожаловать в DevHome</h2>
+                <p class="card-text text-body-secondary">
+                    Чтобы продолжить, войдите через DevHome.Identity.
+                </p>
+                <a class="btn btn-primary" href="login">Войти</a>
+            </div>
+        </div>
+    </NotAuthorized>
+</AuthorizeView>

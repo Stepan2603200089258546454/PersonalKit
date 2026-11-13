@@ -1,0 +1,70 @@
+@page "/weather"
+@attribute [MenuItem("Погода", Description = "Пример потоковой отрисовки данных", Section = "Разное", Icon = "bi bi-cloud-sun", Order = 30)]
+@attribute [StreamRendering]
+
+<PageTitle>Погода</PageTitle>
+
+<h1 class="h3 mb-3">Погода</h1>
+
+<p class="text-body-secondary">Компонент демонстрирует отображение данных.</p>
+
+@if (Forecasts is null)
+{
+    <p><em>Загрузка…</em></p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Дата</th>
+                    <th aria-label="Температура в градусах Цельсия">Темп. (°C)</th>
+                    <th aria-label="Температура в градусах Фаренгейта">Темп. (°F)</th>
+                    <th>Сводка</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var forecast in Forecasts)
+                {
+                    <tr>
+                        <td>@forecast.Date.ToShortDateString()</td>
+                        <td>@forecast.TemperatureC</td>
+                        <td>@forecast.TemperatureF</td>
+                        <td>@forecast.Summary</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    public WeatherForecast[]? Forecasts { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Forecasts is null)
+        {
+            // Имитируем асинхронную загрузку, чтобы показать потоковую отрисовку.
+            await Task.Delay(500);
+
+            var startDate = DateOnly.FromDateTime(DateTime.Now);
+            var summaries = new[] { "Мороз", "Бодрящий холод", "Зябко", "Прохладно", "Умеренно тепло", "Тепло", "Приятное тепло", "Жарко", "Сильная жара", "Испепеляющая жара" };
+            Forecasts = Enumerable.Range(1, 5).Select(index => new WeatherForecast
+            {
+                Date = startDate.AddDays(index),
+                TemperatureC = Random.Shared.Next(-20, 55),
+                Summary = summaries[Random.Shared.Next(summaries.Length)]
+            }).ToArray();
+        }
+    }
+
+    public class WeatherForecast
+    {
+        public DateOnly Date { get; set; }
+        public int TemperatureC { get; set; }
+        public string? Summary { get; set; }
+        public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    }
+}

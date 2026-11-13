@@ -1,0 +1,224 @@
+/* ===================================================
+   Common.UI / Меню навигации
+   Каркас страницы: боковая панель, верхняя панель, контент.
+   Всё оформление построено на Bootstrap 5.3: собственные стили
+   описывают только размеры, которые Bootstrap не задаёт.
+   =================================================== */
+
+/* Каркас приложения на всю высоту окна. */
+.cui-shell {
+    display: flex;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+}
+
+/* Колонка с верхней панелью и контентом. */
+.cui-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.cui-content {
+    min-height: 0;
+}
+
+/* ===============================
+   Боковая панель
+   =============================== */
+
+.cui-sidebar {
+    --cui-sidebar-width: 264px;
+    --cui-sidebar-width-collapsed: 76px;
+    --cui-topbar-height: 62px;
+
+    width: var(--cui-sidebar-width);
+    flex: 0 0 auto;
+    transition: width 0.2s ease;
+}
+
+.cui-sidebar-brand {
+    height: var(--cui-topbar-height);
+    flex: 0 0 auto;
+}
+
+.cui-sidebar-brand-icon {
+    width: 38px;
+    height: 38px;
+    font-size: 1.05rem;
+}
+
+.cui-sidebar-nav {
+    min-height: 0;
+}
+
+.cui-nav-icon {
+    width: 1.25rem;
+    text-align: center;
+}
+
+.cui-nav-link {
+    color: var(--bs-body-color);
+    /* Прозрачная рамка занимает место заранее, чтобы активный пункт
+       не сдвигал соседние строки при появлении видимой рамки. */
+    border: var(--bs-border-width) solid transparent;
+}
+
+.cui-nav-link:hover,
+.cui-nav-link:focus-visible {
+    color: var(--bs-body-color);
+    background-color: var(--bs-tertiary-bg);
+}
+
+/*
+   Активный пункт. Bootstrap у nav-pills закрашивает активную ссылку
+   основным цветом и белым текстом — для бокового меню это слишком ярко.
+   Сохраняем смысл: приглушённый вторичный фон, рамка и те же скругления,
+   но без «кнопочной» заливки.
+*/
+.nav-pills .cui-nav-link.active {
+    color: var(--bs-body-color);
+    background-color: var(--bs-secondary-bg);
+    border-color: var(--bs-border-color);
+}
+
+.nav-pills .cui-nav-link.active:hover,
+.nav-pills .cui-nav-link.active:focus-visible {
+    color: var(--bs-body-color);
+    background-color: var(--bs-secondary-bg);
+    border-color: var(--bs-border-color);
+}
+
+/* Заголовок раздела — кнопка сворачивания. */
+.cui-section-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.5rem 0.35rem;
+    border: 0;
+    border-radius: var(--bs-border-radius);
+    background: transparent;
+    color: var(--bs-secondary-color);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: start;
+}
+
+.cui-section-toggle:hover,
+.cui-section-toggle:focus-visible {
+    color: var(--bs-body-color);
+    background-color: var(--bs-tertiary-bg);
+}
+
+.cui-section-caret {
+    margin-inline-start: auto;
+    font-size: 0.7rem;
+    transition: transform 0.2s ease;
+}
+
+.cui-section-toggle[aria-expanded="false"] .cui-section-caret {
+    transform: rotate(-90deg);
+}
+
+/* ===============================
+   Нижняя часть панели
+   =============================== */
+
+/* Разделитель с отступом от краёв панели. */
+.cui-sidebar-divider {
+    border: 0;
+    border-top: var(--bs-border-width) solid var(--bs-border-color);
+    opacity: 1;
+}
+
+/* Кнопка сворачивания подсвечивается так же, как пункты меню. */
+.cui-sidebar-toggle {
+    color: var(--bs-body-color);
+    text-decoration: none;
+}
+
+.cui-sidebar-toggle:hover,
+.cui-sidebar-toggle:focus-visible {
+    color: var(--bs-body-color);
+    background-color: var(--bs-tertiary-bg);
+}
+
+/* Свёрнутая панель: остаются только иконки. */
+body.cui-sidebar-collapsed .cui-sidebar {
+    width: var(--cui-sidebar-width-collapsed);
+}
+
+body.cui-sidebar-collapsed .cui-sidebar-text {
+    display: none;
+}
+
+body.cui-sidebar-collapsed .cui-sidebar-brand {
+    justify-content: center;
+    padding-inline: 0 !important;
+}
+
+body.cui-sidebar-collapsed .cui-section-toggle {
+    display: none;
+}
+
+/*
+   В свёрнутой панели разделы всегда раскрыты: иначе пункты свёрнутого
+   раздела пропали бы вместе с иконками.
+*/
+body.cui-sidebar-collapsed .cui-menu-section > .collapse {
+    display: block !important;
+}
+
+body.cui-sidebar-collapsed .cui-nav-link {
+    justify-content: center;
+    padding-inline: 0;
+}
+
+body.cui-sidebar-collapsed .cui-sidebar-footer i {
+    transform: rotate(180deg);
+}
+
+/* ===============================
+   Верхняя панель
+   =============================== */
+
+.cui-topbar {
+    min-height: 62px;
+    flex: 0 0 auto;
+}
+
+.cui-topbar-title {
+    min-width: 0;
+}
+
+.cui-topbar-page {
+    max-width: 16rem;
+}
+
+.cui-topbar-description {
+    max-width: 24rem;
+}
+
+/* ===============================
+   Адаптивность
+   =============================== */
+
+@media (max-width: 991.98px) {
+    .cui-sidebar {
+        --cui-sidebar-width: 100%;
+    }
+
+    .cui-topbar {
+        min-height: 56px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cui-sidebar {
+        transition: none;
+    }
+}

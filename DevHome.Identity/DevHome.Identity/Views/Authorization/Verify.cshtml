@@ -1,0 +1,41 @@
+@{
+    Layout = null;
+    var userCode = ViewData["UserCode"] as string ?? string.Empty;
+}
+<!DOCTYPE html>
+<html lang="ru" data-bs-theme="light">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Подтверждение входа</title>
+    @* Страница MVC-контроллера, поэтому стили подключены напрямую. *@
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+</head>
+<body class="bg-body-tertiary">
+    <main class="container py-5" style="max-width: 32rem;">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <h1 class="h4 card-title mb-3">Подтверждение входа</h1>
+                <p class="card-text text-body-secondary">
+                    Введите код, показанный на устройстве, и подтвердите вход в DevHome.
+                </p>
+
+                <form method="post" action="~/connect/verify">
+                    <div class="mb-3">
+                        <label class="form-label" for="user_code">Код устройства</label>
+                        <input class="form-control" id="user_code" name="user_code" value="@userCode"
+                               autocomplete="off" inputmode="text" required />
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary" name="action" value="approve">
+                            Подтвердить
+                        </button>
+                        <a class="btn btn-outline-secondary" href="~/">Отмена</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

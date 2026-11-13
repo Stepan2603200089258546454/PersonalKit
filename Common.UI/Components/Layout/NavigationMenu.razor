@@ -1,0 +1,61 @@
+@implements IDisposable
+@inject NavigationManager Navigation
+@inject IMenuCatalog Catalog
+@inject IOptions<NavigationMenuOptions> MenuOptions
+
+@* Компонент сам подключает стили и скрипты библиотеки: приложению не нужно
+   добавлять их в App.razor. *@
+<CommonUiAssets />
+
+<div class="cui-shell">
+    <NavMenuSidebar Sections="Catalog.Sections"
+                    CurrentUrl="@currentUrl"
+                    Options="Options"
+                    SidebarId="@sidebarId" />
+
+    <div class="cui-main d-flex flex-column">
+        <NavMenuTopbar Options="Options"
+                       Page="currentPage"
+                       CurrentUrl="@currentUrl"
+                       SidebarId="@sidebarId" />
+
+        <main class="cui-content flex-grow-1 overflow-auto bg-body-secondary border rounded m-1 p-3 p-lg-4" role="main">
+            @ChildContent
+        </main>
+    </div>
+</div>
+
+@code {
+    /// <summary>Содержимое страницы.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private readonly string sidebarId = $"cui-sidebar-{Guid.NewGuid():N}";
+    private string currentUrl = string.Empty;
+    private MenuPage? currentPage;
+
+    private NavigationMenuOptions Options => MenuOptions.Value;
+
+    protected override void OnInitialized()
+    {
+        UpdateCurrentLocation(Navigation.Uri);
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        UpdateCurrentLocation(e.Location);
+        StateHasChanged();
+    }
+
+    private void UpdateCurrentLocation(string uri)
+    {
+        currentUrl = MenuRoutes.Normalize(Navigation.ToBaseRelativePath(uri));
+        currentPage = Catalog.FindPage(currentUrl);
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}

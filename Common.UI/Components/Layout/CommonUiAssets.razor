@@ -1,0 +1,49 @@
+@* Единая точка подключения стилей и скриптов библиотеки.
+
+   Blazor хранит только один блок HeadContent на страницу: если два компонента
+   выводят HeadContent, в head попадает содержимое последнего отрисованного.
+   Поэтому все компоненты библиотеки объявляют этот компонент, а он выводит
+   полный набор файлов библиотеки. Набор одинаковый, поэтому не важно, какой
+   из компонентов отрисовался последним: в head окажутся все нужные файлы.
+
+   Стили и скрипты подключаются автоматически вместе с любым компонентом
+   библиотеки — отдельная настройка в App.razor не требуется. *@
+<HeadContent>
+    <link rel="stylesheet" href="@Assets["_content/Common.UI/App.css"]" />
+    <link rel="stylesheet" href="@Assets["_content/Common.UI/NavigationMenu.css"]" />
+
+    @* Ранний скрипт применяет сохранённую тему до отрисовки страницы,
+       чтобы не было вспышки светлой темы. Заодно он пишет cookie с итоговой
+       темой: серверный App.razor читает её и отдаёт в разметке то же значение.
+       Без этого при переходе на интерактивную (WASM) страницу Blazor заменяет
+       атрибуты html на серверные, и выбранная тёмная тема слетала бы. *@
+    <script>
+        (function () {
+            // Ключи должны совпадать с theme-switcher.js.
+            var key = 'cui.theme';
+            var resolved = 'light';
+
+            try {
+                var stored = localStorage.getItem(key);
+                var selected = stored === 'light' || stored === 'dark' ? stored : 'auto';
+
+                resolved = selected === 'auto'
+                    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                    : selected;
+            } catch (e) {
+                // Приватный режим браузера может запрещать localStorage.
+            }
+
+            document.documentElement.setAttribute('data-bs-theme', resolved);
+
+            try {
+                document.cookie = key + '=' + resolved + '; path=/; max-age=31536000; SameSite=Lax';
+            } catch (e) {
+                // Cookie может быть запрещена настройками браузера.
+            }
+        })();
+    </script>
+
+    <script src="@Assets["_content/Common.UI/NavigationMenu.js"]" defer></script>
+    <script src="@Assets["_content/Common.UI/theme-switcher.js"]" defer></script>
+</HeadContent>
