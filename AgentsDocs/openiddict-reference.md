@@ -52,9 +52,10 @@
 | Настройка | Окружение | Что делает |
 |---|---|---|
 | `AddEphemeralEncryptionKey()` / `AddEphemeralSigningKey()` | Development | Ключи создаются в памяти: не нужен сертификат в хранилище Windows. Минус — после перезапуска старые токены недействительны. |
-| `AddDevelopmentEncryptionCertificate()` / `AddDevelopmentSigningCertificate()` | не Development | Сертификаты разработчика. Для промышленной среды нужны постоянные сертификаты из хранилища. |
+| `AddDevelopmentEncryptionCertificate()` / `AddDevelopmentSigningCertificate()` | не Development без каталога сертификатов | Сертификаты разработчика. Для промышленной среды нужны постоянные сертификаты из хранилища. |
+| `AddEncryptionCertificate()` / `AddSigningCertificate()` | каталог `OpenIddict:Certificates:Directory` | Постоянные PFX из тома Docker; создаются при первом запуске (`OpenIddictCertificateLoader`). |
 
-В рабочем окружении постоянные сертификаты обязательны: иначе токены перестанут проверяться после перезапуска и на нескольких экземплярах сервиса одновременно.
+В рабочем окружении постоянные сертификаты обязательны: иначе токены перестанут проверяться после перезапуска и на нескольких экземплярах сервиса одновременно. В Docker это решает том `identity-data`.
 
 ## 6. Интеграция с ASP.NET Core
 
@@ -65,7 +66,7 @@
 | `EnableEndSessionEndpointPassthrough()` | Передаёт `/connect/logout` контроллеру. |
 | `EnableUserInfoEndpointPassthrough()` | Передаёт `/connect/userinfo` контроллеру. |
 | `EnableEndUserVerificationEndpointPassthrough()` | Передаёт `/connect/verify` контроллеру (форма кода устройства). |
-| `DisableTransportSecurityRequirement()` | Только Development: разрешает HTTP для localhost. В рабочем окружении HTTPS обязателен. |
+| `DisableTransportSecurityRequirement()` | Development или явный `OpenIddict:AllowHttp=true`: разрешает HTTP для localhost/домашней сети. В интернете HTTPS обязателен. |
 
 Без passthrough OpenIddict отвечал бы сам, и приложение не смогло бы показать свою страницу входа.
 
@@ -77,10 +78,10 @@
 
 | Понятие | Значение в проекте | Смысл |
 |---|---|---|
-| `ClientId` | `devhome-web`, `devhome-maui`, `devhome-wpf`, `devhome-cli`, `devhome-service` | Публичный «логин» приложения. |
+| `ClientId` | `devhome-web`, `devhome-maui`, `devhome-wpf`, `devhome-cli`, `devhome-service`, `devhome-api` | Публичный «логин» приложения. |
 | `ClientType = Public` | MAUI, WPF, CLI | Приложение не может хранить секрет; защита — PKCE и точный redirect URI. |
-| `ClientType = Confidential` | DevHome (web), сервис | Есть `client_secret`, хранится только на сервере. |
-| `ClientSecret` | `OpenIddict:Clients:Web:Secret`, `OpenIddict:Clients:Service:Secret` | Секрет конфиденциального клиента. В Development есть значения по умолчанию, в рабочем окружении обязательны свои. |
+| `ClientType = Confidential` | DevHome (web), сервис, API | Есть `client_secret`, хранится только на сервере. |
+| `ClientSecret` | `OpenIddict:Clients:Web:Secret`, `OpenIddict:Clients:Service:Secret`, `OpenIddict:Clients:Api:Secret` | Секрет конфиденциального клиента. В Development есть значения по умолчанию, в рабочем окружении обязательны свои. |
 | `ConsentType = Implicit` | все клиенты | Экран согласия не показывается: приложения свои. Для сторонних приложений включается явное согласие. |
 | `RedirectUris` / `PostLogoutRedirectUris` | `https://localhost:7270/signin-oidc`, `http://127.0.0.1:5180/callback`, `http://127.0.0.1:5181/callback` | Куда вернуть браузер с кодом и после выхода. Совпадение проверяется символ в символ. |
 | `Requirements.Features.ProofKeyForCodeExchange` | MAUI, WPF | Обязательный PKCE на уровне клиента. |
@@ -101,6 +102,7 @@
 | `Permissions.ResponseTypes.Code` | Ответ в виде кода (не токена в URL). |
 | `Permissions.Scopes.Profile`, `.Email` | Области профиля и почты. |
 | `Permissions.Prefixes.Scope + DevHomeScopes.Api` | Область `devhome.api`. |
+| `Permissions.Endpoints.Introspection` | Доступ к `/connect/introspect`; нужен клиенту `devhome-api`. |
 
 ## 9. Области (scopes)
 
@@ -127,7 +129,21 @@
 | `identity.SetClaim(Claims.Subject, clientId)` | субъект = клиент | Пользователя в этом сценарии нет. |
 | `context.SignIn(principal)` | завершение запроса | OpenIddict формирует ответ с токеном. |
 
-## 11. Claim и их назначение
+## 11. Проверка токена в API (introspection)
+
+`DevHome.Api` не проверяет подпись токена локально и не читает базу Identity. Он отправляет
+токен в `/connect/introspect` от имени конфиденциального клиента `devhome-api`:
+
+- клиент `devhome-api` создаётся сидером и имеет только `Permissions.Endpoints.Introspection`;
+- в область `devhome.api` добавлен ресурс `devhome-api`, поэтому аудитория токена
+  содержит и API-ресурс, и клиента проверки. Без этого OpenIddict отвечает `active: false`
+  на попытку проверить «чужой» токен;
+- ответ `active: true` означает, что токен выдан этим Identity, не истёк и не отозван.
+
+Такой подход удобен для контейнеров: API не нужны сертификаты подписи, а при недоступности
+Identity приватные методы возвращают `401`.
+
+## 12. Claim и их назначение
 
 `AuthorizationController.CreatePrincipalAsync` собирает claim пользователя, `GetDestinations` решает, куда каждый попадёт.
 
@@ -141,7 +157,7 @@
 
 `AccessToken` читает API, `IdentityToken` читает клиент. Пользовательские данные попадают в оба токена, чтобы клиенту не требовался лишний запрос в `/connect/userinfo`.
 
-## 12. Настройки приложения
+## 13. Настройки приложения
 
 | Ключ | Назначение |
 |---|---|
@@ -150,8 +166,12 @@
 | `OpenIddict:Clients:Web:Secret` | Секрет веб-клиента. |
 | `OpenIddict:Clients:Service:Secret` | Секрет сервисного клиента. |
 | `OpenIddict:DemoUser:Email`, `OpenIddict:DemoUser:Password` | Демо-учётная запись (только Development). |
+| `OpenIddict:Seed:RefreshClients` | Обновлять клиентов и область при старте (нужно в Docker при смене адреса). |
+| `OpenIddict:Certificates:Directory`, `Password` | Постоянные PFX-сертификаты OpenIddict вместо временных ключей. |
+| `OpenIddict:AllowHttp` | Разрешить HTTP-транспорт (домашняя сеть, Docker). |
+| `Identity:Admin:Email`, `Identity:Admin:Password` | Администратор; пароль используется только при создании в пустой базе. |
 
-## 13. Что упрощено в Development и что менять для промышленной среды
+## 14. Что упрощено в Development и что менять для промышленной среды
 
 | В Development | Для промышленной среды |
 |---|---|

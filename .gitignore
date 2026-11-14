@@ -64,6 +64,9 @@ project.fragment.lock.json
 artifacts/
 App_Data/
 
+# Docker: локальные секреты и переменные compose
+.env
+
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
 

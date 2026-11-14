@@ -1,3 +1,4 @@
+using System.Reflection;
 using Common.UI;
 using DevHome.Client.Pages;
 using DevHome.Components;
@@ -48,6 +49,11 @@ if (!string.IsNullOrWhiteSpace(dataProtectionPath))
 // DevHome входит через DevHome.Identity так же, как обычные сервисы входят через Google.
 var authority = builder.Configuration["Authentication:DevHome:Authority"] ?? "https://localhost:7163/";
 
+// В Docker приложение доступно по http внутри локальной сети: HTTPS-сертификат
+// на IP-адрес не выпустить без reverse proxy, поэтому режим разрешён явно.
+var allowHttp = builder.Environment.IsDevelopment()
+    || builder.Configuration.GetValue("Authentication:DevHome:AllowHttp", false);
+
 builder.Services.AddAuthentication(options =>
     {
         options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -55,7 +61,7 @@ builder.Services.AddAuthentication(options =>
     })
     .AddCookie(options =>
     {
-        if (builder.Environment.IsDevelopment())
+        if (allowHttp)
         {
             // Локальный запуск по http: cookie без флага Secure.
             options.Cookie.SecurePolicy = CookieSecurePolicy.None;
@@ -72,8 +78,17 @@ builder.Services.AddAuthentication(options =>
         options.GetClaimsFromUserInfoEndpoint = true;
         options.CallbackPath = "/signin-oidc";
         options.SignedOutCallbackPath = "/signout-callback-oidc";
-        options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+        options.RequireHttpsMetadata = !allowHttp;
         options.TokenValidationParameters.NameClaimType = "name";
+
+        // В Docker метаданные можно брать по внутреннему адресу контейнера,
+        // а браузеру выдавать публичные адреса из issuer. Обычно не требуется:
+        // контейнер обращается к публичному адресу через host-gateway.
+        var metadataAddress = builder.Configuration["Authentication:DevHome:MetadataAddress"];
+        if (!string.IsNullOrWhiteSpace(metadataAddress))
+        {
+            options.MetadataAddress = metadataAddress;
+        }
 
         options.Scope.Clear();
         options.Scope.Add("openid");
@@ -82,7 +97,7 @@ builder.Services.AddAuthentication(options =>
         options.Scope.Add("offline_access");
         options.Scope.Add("devhome.api");
 
-        if (builder.Environment.IsDevelopment())
+        if (allowHttp)
         {
             // В разработке DevHome.Identity использует самоподписанный сертификат,
             // а приложение может запускаться по http.
@@ -103,17 +118,35 @@ builder.Services.AddAuthentication(options =>
 
 var app = builder.Build();
 
+// В контейнере приложение слушает только http: HTTPS обычно снимает
+// внешний reverse proxy. Настройка позволяет отключить перенаправление.
+var useHttpsRedirection = app.Configuration.GetValue("Http:UseHttpsRedirection", true);
+
 // Настраиваем конвейер обработки HTTP-запросов.
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    app.UseHsts();
+
+    if (useHttpsRedirection)
+    {
+        app.UseHsts();
+    }
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-app.UseHttpsRedirection();
+
+if (useHttpsRedirection)
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapGet("/health", () =>
+{
+    var version = GetApplicationVersion();
+    return Results.Ok(new { status = "ok", version });
+});
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
@@ -136,5 +169,14 @@ app.MapGet("/logout", async (HttpContext context) =>
         OpenIdConnectDefaults.AuthenticationScheme,
         new AuthenticationProperties { RedirectUri = "/" });
 });
+
+static string GetApplicationVersion()
+{
+    var assembly = typeof(Program).Assembly;
+
+    return assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? assembly.GetName().Version?.ToString()
+        ?? "unknown";
+}
 
 app.Run();

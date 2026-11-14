@@ -31,6 +31,12 @@ public static class OpenIddictConfiguration
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(environment);
 
+        // В контейнере ключи подписи должны переживать перезапуск, иначе после
+        // каждого обновления образа все пользователи выходят из приложений.
+        // Каталог задаётся в docker-compose и лежит на постоянном томе.
+        var certificates = OpenIddictCertificateLoader.LoadOrCreate(configuration, environment);
+        var allowHttp = configuration.GetValue("OpenIddict:AllowHttp", false);
+
         services.AddOpenIddict()
 
             // -----------------------------------------------------------------
@@ -61,6 +67,9 @@ public static class OpenIddictConfiguration
                     .SetTokenEndpointUris("connect/token")
                     // Данные пользователя по access-токену (OIDC UserInfo).
                     .SetUserInfoEndpointUris("connect/userinfo")
+                    // Проверка токена для API: API спрашивает у Identity,
+                    // действителен ли предъявленный access-токен.
+                    .SetIntrospectionEndpointUris("connect/introspect")
                     // Device code flow: устройство получает код и опрашивает сервер.
                     .SetDeviceAuthorizationEndpointUris("connect/deviceauthorization")
                     // Страница, где пользователь вводит код устройства.
@@ -109,7 +118,15 @@ public static class OpenIddictConfiguration
                     // ввести его, а забытый код быстро становится недействительным.
                     .SetDeviceCodeLifetime(TimeSpan.FromMinutes(10));
 
-                if (environment.IsDevelopment())
+                if (certificates is not null)
+                {
+                    // Контейнер: постоянные самоподписанные сертификаты из тома.
+                    // Они переживают перезапуск, поэтому refresh-токены продолжают работать.
+                    options
+                        .AddEncryptionCertificate(certificates.Encryption)
+                        .AddSigningCertificate(certificates.Signing);
+                }
+                else if (environment.IsDevelopment())
                 {
                     // В разработке ключи подписи и шифрования создаются в памяти:
                     // не нужен сертификат в хранилище Windows и права на него.
@@ -138,10 +155,11 @@ public static class OpenIddictConfiguration
                     .EnableUserInfoEndpointPassthrough()
                     .EnableEndUserVerificationEndpointPassthrough();
 
-                if (environment.IsDevelopment())
+                if (environment.IsDevelopment() || allowHttp)
                 {
-                    // В разработке разрешаем http, чтобы клиенты могли обращаться
-                    // к localhost без сертификата. В рабочем окружении HTTPS обязателен.
+                    // В разработке и в домашней локальной сети разрешаем http,
+                    // чтобы клиенты могли обращаться к localhost или IP без сертификата.
+                    // Для выхода в интернет этот режим включать нельзя.
                     aspNetCore.DisableTransportSecurityRequirement();
                 }
 

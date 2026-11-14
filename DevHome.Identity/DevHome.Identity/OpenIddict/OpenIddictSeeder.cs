@@ -1,4 +1,4 @@
-﻿using DevHome.Identity.Administration;
+using DevHome.Identity.Administration;
 using DevHome.Identity.DataContext.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
@@ -31,7 +31,7 @@ public static class OpenIddictSeeder
         await using var scope = services.CreateAsyncScope();
 
         var scopeManager = scope.ServiceProvider.GetRequiredService<IOpenIddictScopeManager>();
-        await EnsureScopeAsync(scopeManager);
+        await EnsureScopeAsync(scopeManager, configuration);
 
         var applicationManager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
 
@@ -40,24 +40,44 @@ public static class OpenIddictSeeder
         await EnsureCliClientAsync(applicationManager);
         await EnsureWebClientAsync(applicationManager, configuration, environment);
         await EnsureServiceClientAsync(applicationManager, configuration, environment);
+        await EnsureApiClientAsync(applicationManager, configuration, environment);
 
         await EnsureUsersAsync(scope.ServiceProvider, configuration, environment);
     }
 
-    private static async Task EnsureScopeAsync(IOpenIddictScopeManager manager)
+    private static async Task EnsureScopeAsync(
+        IOpenIddictScopeManager manager,
+        IConfiguration configuration)
     {
-        if (await manager.FindByNameAsync(DevHomeScopes.Api) is not null)
-        {
-            return;
-        }
-
-        await manager.CreateAsync(new OpenIddictScopeDescriptor
+        var descriptor = new OpenIddictScopeDescriptor
         {
             Name = DevHomeScopes.Api,
             DisplayName = "DevHome API",
             Description = "Доступ к API приложений DevHome.",
-            Resources = { DevHomeScopes.Api }
-        });
+            // devhome.api — ресурс, для которого выдан токен.
+            // devhome-api — клиент API, который проверяет токен через introspection.
+            // OpenIddict разрешает introspection, только если клиент совпадает
+            // с клиентом токена или входит в его аудиторию.
+            Resources =
+            {
+                DevHomeScopes.Api,
+                DevHomeClients.Api
+            }
+        };
+
+        var refresh = configuration.GetValue("OpenIddict:Seed:RefreshClients", false);
+
+        if (await manager.FindByNameAsync(DevHomeScopes.Api) is { } existing)
+        {
+            if (refresh)
+            {
+                await manager.UpdateAsync(existing, descriptor);
+            }
+
+            return;
+        }
+
+        await manager.CreateAsync(descriptor);
     }
 
     private static Task EnsureMauiClientAsync(IOpenIddictApplicationManager manager) =>
@@ -153,52 +173,19 @@ public static class OpenIddictSeeder
         var redirectUri = new Uri(configuration["OpenIddict:Clients:Web:RedirectUri"]
             ?? "https://localhost:7270/signin-oidc");
 
-        if (await manager.FindByClientIdAsync(DevHomeClients.Web) is { } existing)
-        {
-            if (!environment.IsDevelopment())
-            {
-                return;
-            }
-
-            // В разработке пересоздаём клиента, чтобы применить новые адреса возврата.
-            await manager.DeleteAsync(existing);
-        }
-
-        var secret = configuration["OpenIddict:Clients:Web:Secret"];
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            if (!environment.IsDevelopment())
-            {
-                throw new InvalidOperationException(
-                    "Не задан секрет клиента DevHome: OpenIddict:Clients:Web:Secret.");
-            }
-
-            secret = "devhome-web-development-secret";
-        }
-
-        await manager.CreateAsync(new OpenIddictApplicationDescriptor
+        var descriptor = new OpenIddictApplicationDescriptor
         {
             ClientId = DevHomeClients.Web,
             // Конфиденциальный клиент: серверный код DevHome может хранить секрет,
             // поэтому дополнительно к PKCE проверяется client_secret.
             ClientType = ClientTypes.Confidential,
-            ClientSecret = secret,
+            ClientSecret = ResolveClientSecret(
+                configuration,
+                environment,
+                "OpenIddict:Clients:Web:Secret",
+                "devhome-web-development-secret"),
             ConsentType = ConsentTypes.Implicit,
             DisplayName = "DevHome — веб-приложение",
-            // Перечислены оба варианта адреса приложения: https для отладки
-            // по сертификату разработчика и http для запуска без сертификата.
-            RedirectUris =
-            {
-                redirectUri,
-                new Uri("http://localhost:5149/signin-oidc"),
-                new Uri("http://127.0.0.1:5149/signin-oidc")
-            },
-            PostLogoutRedirectUris =
-            {
-                new Uri(redirectUri, "/signout-callback-oidc"),
-                new Uri("http://localhost:5149/signout-callback-oidc"),
-                new Uri("http://127.0.0.1:5149/signout-callback-oidc")
-            },
             Permissions =
             {
                 Permissions.Endpoints.Authorization,
@@ -211,7 +198,36 @@ public static class OpenIddictSeeder
                 Permissions.Scopes.Email,
                 Permissions.Prefixes.Scope + DevHomeScopes.Api
             }
-        });
+        };
+
+        // В Docker адрес приложения зависит от IP компьютера в локальной сети,
+        // поэтому при смене PUBLIC_HOST клиента нужно обновить. Настройка
+        // OpenIddict:Seed:RefreshClients включает обновление при каждом запуске.
+        AddRedirectUris(descriptor.RedirectUris, redirectUri);
+        AddRedirectUris(descriptor.PostLogoutRedirectUris, new Uri(redirectUri, "/signout-callback-oidc"));
+
+        // Адреса localhost остаются для запуска без Docker из Visual Studio.
+        AddRedirectUris(descriptor.RedirectUris, new Uri("http://localhost:5149/signin-oidc"));
+        AddRedirectUris(descriptor.RedirectUris, new Uri("http://127.0.0.1:5149/signin-oidc"));
+        AddRedirectUris(descriptor.PostLogoutRedirectUris, new Uri("http://localhost:5149/signout-callback-oidc"));
+        AddRedirectUris(descriptor.PostLogoutRedirectUris, new Uri("http://127.0.0.1:5149/signout-callback-oidc"));
+
+        var refresh = configuration.GetValue("OpenIddict:Seed:RefreshClients", false);
+
+        if (await manager.FindByClientIdAsync(DevHomeClients.Web) is { } existing)
+        {
+            if (!environment.IsDevelopment() && !refresh)
+            {
+                return;
+            }
+
+            // В разработке и в Docker обновляем существующего клиента,
+            // а не удаляем: так не теряются выданные ранее согласия и токены.
+            await manager.UpdateAsync(existing, descriptor);
+            return;
+        }
+
+        await manager.CreateAsync(descriptor);
     }
 
     private static async Task EnsureServiceClientAsync(
@@ -219,28 +235,15 @@ public static class OpenIddictSeeder
         IConfiguration configuration,
         IHostEnvironment environment)
     {
-        if (await manager.FindByClientIdAsync(DevHomeClients.Service) is not null)
-        {
-            return;
-        }
-
-        var secret = configuration["OpenIddict:Clients:Service:Secret"];
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            if (!environment.IsDevelopment())
-            {
-                throw new InvalidOperationException(
-                    "Не задан секрет клиента DevHome: OpenIddict:Clients:Service:Secret.");
-            }
-
-            secret = "devhome-service-development-secret";
-        }
-
-        await manager.CreateAsync(new OpenIddictApplicationDescriptor
+        var descriptor = new OpenIddictApplicationDescriptor
         {
             ClientId = DevHomeClients.Service,
             ClientType = ClientTypes.Confidential,
-            ClientSecret = secret,
+            ClientSecret = ResolveClientSecret(
+                configuration,
+                environment,
+                "OpenIddict:Clients:Service:Secret",
+                "devhome-service-development-secret"),
             ConsentType = ConsentTypes.Implicit,
             DisplayName = "DevHome — сервис",
             // Сервисный клиент ходит только в token endpoint и только за
@@ -251,7 +254,94 @@ public static class OpenIddictSeeder
                 Permissions.GrantTypes.ClientCredentials,
                 Permissions.Prefixes.Scope + DevHomeScopes.Api
             }
-        });
+        };
+
+        var refresh = configuration.GetValue("OpenIddict:Seed:RefreshClients", false);
+
+        if (await manager.FindByClientIdAsync(DevHomeClients.Service) is { } existing)
+        {
+            if (refresh)
+            {
+                await manager.UpdateAsync(existing, descriptor);
+            }
+
+            return;
+        }
+
+        await manager.CreateAsync(descriptor);
+    }
+
+    /// <summary>
+    /// Создаёт клиента, от имени которого API проверяет токены через introspection.
+    /// </summary>
+    /// <remarks>
+    /// API не хранит ключи подписи и не читает базу Identity: он отправляет токен
+    /// в /connect/introspect и получает ответ «действителен / недействителен».
+    /// Для этого клиенту нужно только разрешение на endpoint introspection.
+    /// </remarks>
+    private static async Task EnsureApiClientAsync(
+        IOpenIddictApplicationManager manager,
+        IConfiguration configuration,
+        IHostEnvironment environment)
+    {
+        var descriptor = new OpenIddictApplicationDescriptor
+        {
+            ClientId = DevHomeClients.Api,
+            ClientType = ClientTypes.Confidential,
+            ClientSecret = ResolveClientSecret(
+                configuration,
+                environment,
+                "OpenIddict:Clients:Api:Secret",
+                "devhome-api-development-secret"),
+            ConsentType = ConsentTypes.Implicit,
+            DisplayName = "DevHome — API (проверка токенов)",
+            Permissions =
+            {
+                Permissions.Endpoints.Introspection
+            }
+        };
+
+        var refresh = configuration.GetValue("OpenIddict:Seed:RefreshClients", false);
+
+        if (await manager.FindByClientIdAsync(DevHomeClients.Api) is { } existing)
+        {
+            if (refresh)
+            {
+                await manager.UpdateAsync(existing, descriptor);
+            }
+
+            return;
+        }
+
+        await manager.CreateAsync(descriptor);
+    }
+
+    private static string ResolveClientSecret(
+        IConfiguration configuration,
+        IHostEnvironment environment,
+        string key,
+        string developmentSecret)
+    {
+        var secret = configuration[key];
+        if (!string.IsNullOrWhiteSpace(secret))
+        {
+            return secret;
+        }
+
+        if (!environment.IsDevelopment())
+        {
+            throw new InvalidOperationException($"Не задан секрет клиента DevHome: {key}.");
+        }
+
+        return developmentSecret;
+    }
+
+    private static void AddRedirectUris(ICollection<Uri> uris, Uri uri)
+    {
+        if (!uris.Contains(uri))
+        {
+            uris.Add(uri);
+        }
     }
 
     /// <summary>
@@ -299,10 +389,44 @@ public static class OpenIddictSeeder
         var administrator = await userManager.FindByEmailAsync(adminEmail);
         if (administrator is null)
         {
-            logger.LogInformation(
-                "Пользователь {Email} из Identity:Admin:Email ещё не зарегистрирован: роль администратора будет назначена при следующем запуске.",
-                adminEmail);
-            return;
+            // В чистой базе администратора ещё нет. В Docker нет SMTP,
+            // поэтому подтвердить почту обычной регистрацией невозможно:
+            // первый администратор создаётся из Identity:Admin:Password.
+            var adminPassword = configuration["Identity:Admin:Password"];
+            if (string.IsNullOrWhiteSpace(adminPassword))
+            {
+                logger.LogInformation(
+                    "Пользователь {Email} из Identity:Admin:Email ещё не зарегистрирован: роль администратора будет назначена при следующем запуске. " +
+                    "Для создания администратора в чистой базе задайте Identity:Admin:Password.",
+                    adminEmail);
+                return;
+            }
+
+            administrator = new ApplicationUser
+            {
+                UserName = adminEmail,
+                Email = adminEmail,
+                // Почта подтверждена: иначе вход закрыт настройкой RequireConfirmedAccount.
+                EmailConfirmed = true
+            };
+
+            var createResult = await userManager.CreateAsync(administrator, adminPassword);
+            if (!createResult.Succeeded)
+            {
+                logger.LogWarning(
+                    "Не удалось создать администратора {Email}: {Errors}",
+                    adminEmail,
+                    string.Join("; ", createResult.Errors.Select(error => error.Description)));
+                return;
+            }
+
+            logger.LogInformation("Создан администратор {Email}.", adminEmail);
+        }
+        else if (!administrator.EmailConfirmed)
+        {
+            // Администратор задан явно: подтверждаем почту, иначе он не сможет войти.
+            administrator.EmailConfirmed = true;
+            await userManager.UpdateAsync(administrator);
         }
 
         if (await userManager.IsInRoleAsync(administrator, AdminRoles.Administrator))

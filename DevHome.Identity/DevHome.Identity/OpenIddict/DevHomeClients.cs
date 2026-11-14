@@ -26,6 +26,12 @@ internal static class DevHomeClients
     public const string Service = "devhome-service";
 
     /// <summary>
+    /// Клиент API для проверки токенов через introspection. Сам API не входит
+    /// в систему как пользователь: он только спрашивает Identity, действителен ли токен.
+    /// </summary>
+    public const string Api = "devhome-api";
+
+    /// <summary>
     /// Адрес возврата MAUI-клиента. Используется 127.0.0.1, а не localhost:
     /// локальный HTTP-сервер слушает именно этот адрес, и строка должна совпадать
     /// с зарегистрированной в базе Identity.

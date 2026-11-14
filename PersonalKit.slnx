@@ -1,5 +1,8 @@
 ﻿<Solution>
   <Folder Name="/Applications/" />
+  <Folder Name="/Applications/API/">
+    <Project Path="DevHome/DevHome.Api/DevHome.Api.csproj" />
+  </Folder>
   <Folder Name="/Applications/Identity/">
     <Project Path="DevHome.Identity.DataContext/DevHome.Identity.DataContext.csproj" Id="69df1329-478c-47bd-8ef0-22a8e2bc6d37" />
     <Project Path="DevHome.Identity/DevHome.Identity.Client/DevHome.Identity.Client.csproj" Id="c7d972f1-7655-4d66-b660-2f439422a800" />
@@ -25,15 +28,21 @@
   </Folder>
   <Folder Name="/Элементы решения/">
     <File Path=".dockerignore" />
+    <File Path=".env.example" />
     <File Path=".gitattributes" />
     <File Path=".gitignore" />
     <File Path="AGENTS.md" />
+    <File Path="Build-Docker.cmd" />
     <File Path="Directory.Build.props" />
     <File Path="Directory.Packages.props" />
+    <File Path="docker-compose.yml" />
   </Folder>
   <Folder Name="/AgentsDocs/">
+    <File Path="AgentsDocs/api-template.md" />
     <File Path="AgentsDocs/common-ui.md" />
     <File Path="AgentsDocs/devhome-oauth.md" />
+    <File Path="AgentsDocs/docker.md" />
+    <File Path="AgentsDocs/docker-quickstart.md" />
     <File Path="AgentsDocs/http-client-template.md" />
     <File Path="AgentsDocs/identity-administration.md" />
     <File Path="AgentsDocs/openiddict-reference.md" />
@@ -41,6 +50,7 @@
   </Folder>
   <Folder Name="/AgentsTools/">
     <File Path="AgentsTools/README.md" />
+    <File Path="AgentsTools/Start-Docker.ps1" />
     <File Path="AgentsTools/Sync-Solution.ps1" />
   </Folder>
 </Solution>

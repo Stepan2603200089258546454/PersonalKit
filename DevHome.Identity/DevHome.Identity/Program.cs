@@ -1,3 +1,4 @@
+using System.Reflection;
 using Common.UI;
 using DevHome.Identity.Client.Pages;
 using DevHome.Identity.Components;
@@ -68,9 +69,14 @@ if (!string.IsNullOrWhiteSpace(dataProtectionPath))
 builder.Services.AddDevHomeOpenIddict(builder.Configuration, builder.Environment);
 
 builder.Services.AddSingleton<IEmailSender<ApplicationUser>, IdentityNoOpEmailSender>();
+builder.Services.AddSingleton<DatabaseReadiness>();
 builder.Services.AddHostedService<DatabaseInitializer>();
 
 var app = builder.Build();
+
+// В контейнере приложение слушает только http: HTTPS обычно снимает
+// внешний reverse proxy. Настройка позволяет отключить перенаправление.
+var useHttpsRedirection = app.Configuration.GetValue("Http:UseHttpsRedirection", true);
 
 // Настраиваем конвейер обработки HTTP-запросов.
 if (app.Environment.IsDevelopment())
@@ -80,14 +86,41 @@ if (app.Environment.IsDevelopment())
 else
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // Значение HSTS по умолчанию — 30 дней; для промышленной эксплуатации при необходимости увеличьте его: https://aka.ms/aspnetcore-hsts.
-    app.UseHsts();
+
+    if (useHttpsRedirection)
+    {
+        // Значение HSTS по умолчанию — 30 дней; для промышленной эксплуатации при необходимости увеличьте его: https://aka.ms/aspnetcore-hsts.
+        app.UseHsts();
+    }
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-app.UseHttpsRedirection();
+
+if (useHttpsRedirection)
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Проверка готовности для docker-compose: пока база не готова,
+// контейнер не считается здоровым, и DevHome/API не запускаются.
+app.MapGet("/health", (DatabaseReadiness readiness) =>
+{
+    var version = GetApplicationVersion();
+
+    return readiness.IsReady
+        ? Results.Ok(new { status = "ok", database = "ready", version })
+        : Results.Json(
+            new
+            {
+                status = "starting",
+                database = "not-ready",
+                version,
+                error = readiness.LastError
+            },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+});
 
 app.MapStaticAssets();
 app.MapControllers();
@@ -98,5 +131,14 @@ app.MapRazorComponents<App>()
 
 // Добавляем конечные точки, необходимые компонентам Identity из папки /Account.
 app.MapAdditionalIdentityEndpoints();
+
+static string GetApplicationVersion()
+{
+    var assembly = typeof(Program).Assembly;
+
+    return assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? assembly.GetName().Version?.ToString()
+        ?? "unknown";
+}
 
 app.Run();

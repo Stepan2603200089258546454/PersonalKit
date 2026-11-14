@@ -21,3 +21,7 @@
 - `identity-administration.md` — админ-панель и личный кабинет `DevHome.Identity`:
   роли, страницы управления пользователями и OpenIddict, объединённые маршруты.
 - `common-ui.md` — библиотека компонентов `Common.UI`: меню, темы, атрибуты страниц.
+- `docker.md` — запуск DevHome, Identity и API в Docker Desktop: режимы сборки,
+  версии, PostgreSQL, локальная сеть, диагностика.
+- `docker-quickstart.md` — короткая инструкция первого запуска в Docker.
+- `api-template.md` — шаблонное API с публичными и защищёнными методами OpenIddict.

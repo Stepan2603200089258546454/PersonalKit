@@ -192,9 +192,11 @@ public sealed class AuthorizationController(
 
         // Ресурс devhome.api делает токен «адресованным» API DevHome:
         // без него API отклонит токен как выданный для другого ресурса.
+        // devhome-api добавлен в аудиторию, чтобы клиент API мог проверять
+        // этот токен через introspection.
         if (grantedScopes.Contains(DevHomeScopes.Api, StringComparer.Ordinal))
         {
-            identity.SetResources(DevHomeScopes.Api);
+            identity.SetResources(DevHomeScopes.Api, DevHomeClients.Api);
         }
 
         identity.SetDestinations(GetDestinations);

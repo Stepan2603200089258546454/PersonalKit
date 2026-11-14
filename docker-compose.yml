@@ -1,0 +1,166 @@
+# DevHome + DevHome.Identity + шаблонное API в Docker Desktop.
+#
+# Обычный запуск:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File AgentsTools/Start-Docker.ps1
+#
+# Или вручную:
+#   Copy-Item .env.example .env
+#   (отредактируйте PUBLIC_HOST и ADMIN_EMAIL в .env)
+#   docker compose up -d --build
+#
+# Версия задаётся переменной APP_VERSION (по умолчанию 0.1.0).
+# Режим сборки — BUILD_MODE=source|published.
+#
+# База данных НЕ входит в этот compose: используется существующий контейнер
+# postgres_db в сети postgresql_backend. Так данные не теряются при
+# пересоздании приложений.
+
+name: devhome
+
+services:
+  # -------------------------------------------------------------------------
+  # DevHome.Identity — вход, пользователи, OpenIddict, админка.
+  # Порт 5201 на хосте; внутри контейнера 8080.
+  # -------------------------------------------------------------------------
+  identity:
+    image: devhome/identity:${APP_VERSION:-0.1.0}
+    build:
+      context: .
+      dockerfile: DevHome.Identity/DevHome.Identity/Dockerfile
+      target: ${BUILD_MODE:-source}
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+
+      # Строка подключения к существующей базе в контейнере postgres_db.
+      DBConfiguration__DefaultConnection: "Host=${POSTGRES_HOST:-postgres_db};Database=${POSTGRES_DB:-DevHome.Identity};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-SuperSecretPassword123!};Port=${POSTGRES_PORT:-5432};Maximum Pool Size=200;Minimum Pool Size=10;Connection Idle Lifetime=300;"
+
+      # Публичный адрес Identity. По нему браузер открывает страницу входа,
+      # и он же попадает в issuer токенов.
+      OpenIddict__Issuer: "http://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}:5201/"
+      OpenIddict__Certificates__Password: ${OPENIDDICT_CERT_PASSWORD:-devhome-docker-certificate}
+
+      # Адрес возврата браузера после входа. При смене PUBLIC_HOST
+      # клиент devhome-web обновляется автоматически (RefreshClients).
+      OpenIddict__Clients__Web__RedirectUri: "http://${PUBLIC_HOST}:5149/signin-oidc"
+      OpenIddict__Clients__Web__Secret: ${WEB_CLIENT_SECRET:-devhome-web-development-secret}
+      OpenIddict__Clients__Service__Secret: ${SERVICE_CLIENT_SECRET:-devhome-service-development-secret}
+      OpenIddict__Clients__Api__Secret: ${API_CLIENT_SECRET:-devhome-api-development-secret}
+
+      # Первый администратор. В существующей базе пользователь уже есть;
+      # в чистой базе он будет создан с подтверждённой почтой.
+      Identity__Admin__Email: ${ADMIN_EMAIL:?Set ADMIN_EMAIL in .env}
+      Identity__Admin__Password: ${ADMIN_PASSWORD:-}
+    ports:
+      - "${IDENTITY_PORT:-5201}:8080"
+    volumes:
+      # Ключи Data Protection и сертификаты OpenIddict переживают перезапуск.
+      - identity-data:/app/App_Data
+      # Production-настройки можно править на хосте и перезапускать контейнер
+      # без пересборки образа.
+      - ./DevHome.Identity/DevHome.Identity/appsettings.Production.json:/app/appsettings.Production.json
+    networks:
+      - devhome
+      - postgresql_backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  # -------------------------------------------------------------------------
+  # DevHome — веб-приложение. Порт 5149 на хосте; внутри 8080.
+  # -------------------------------------------------------------------------
+  web:
+    image: devhome/web:${APP_VERSION:-0.1.0}
+    build:
+      context: .
+      dockerfile: DevHome/DevHome/Dockerfile
+      target: ${BUILD_MODE:-source}
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+
+      # Браузер и серверная часть DevHome ходят к Identity по публичному адресу.
+      # Контейнеру этот адрес разрешается через host-gateway (ниже).
+      Authentication__DevHome__Authority: "http://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}:5201/"
+      Authentication__DevHome__ClientSecret: ${WEB_CLIENT_SECRET:-devhome-web-development-secret}
+    ports:
+      - "${WEB_PORT:-5149}:8080"
+    volumes:
+      - web-data:/app/App_Data
+      - ./DevHome/DevHome/appsettings.Production.json:/app/appsettings.Production.json
+    extra_hosts:
+      # Чтобы контейнер мог обратиться к опубликованному порту Identity
+      # по тому же адресу, который видит браузер.
+      - "${PUBLIC_HOST}:host-gateway"
+    networks:
+      - devhome
+    depends_on:
+      identity:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  # -------------------------------------------------------------------------
+  # DevHome.Api — шаблон API. Наружу НЕ публикуется: доступен только
+  # контейнерам сети devhome (например, web) и через docker compose exec.
+  # -------------------------------------------------------------------------
+  api:
+    image: devhome/api:${APP_VERSION:-0.1.0}
+    build:
+      context: .
+      dockerfile: DevHome/DevHome.Api/Dockerfile
+      target: ${BUILD_MODE:-source}
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      OpenIddict__Issuer: "http://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}:5201/"
+      OpenIddict__Validation__ClientSecret: ${API_CLIENT_SECRET:-devhome-api-development-secret}
+    expose:
+      - "8080"
+    volumes:
+      - ./DevHome/DevHome.Api/appsettings.Production.json:/app/appsettings.Production.json
+    extra_hosts:
+      - "${PUBLIC_HOST}:host-gateway"
+    networks:
+      - devhome
+    depends_on:
+      identity:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  # Ключи Identity: Data Protection и сертификаты подписи OpenIddict.
+  identity-data:
+  # Ключи Data Protection веб-приложения DevHome.
+  web-data:
+
+networks:
+  # Внутренняя сеть приложений. API виден только здесь.
+  devhome:
+    name: devhome
+  # Сеть, в которой уже работает контейнер postgres_db.
+  # Если у вас она называется иначе, задайте POSTGRES_NETWORK в .env.
+  postgresql_backend:
+    external: true
+    name: ${POSTGRES_NETWORK:-postgresql_backend}

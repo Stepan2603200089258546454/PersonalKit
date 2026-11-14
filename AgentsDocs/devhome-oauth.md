@@ -22,6 +22,7 @@
 - `/connect/deviceauthorization` — запрос кода устройства;
 - `/connect/verify` — подтверждение кода устройства пользователем;
 - `/connect/userinfo` — профиль по access-токену;
+- `/connect/introspect` — проверка токена для API;
 - `/connect/logout` — завершение сеанса.
 
 Области: `openid`, `profile`, `email`, `offline_access`, `devhome.api`.
@@ -43,7 +44,7 @@
 
 ## Клиенты
 
-Все клиенты уже зарегистрированы сидером (`OpenIddictSeeder`), повторный запуск не создаёт дубликатов. В Development веб-клиент пересоздаётся, чтобы применить адреса возврата.
+Все клиенты уже зарегистрированы сидером (`OpenIddictSeeder`), повторный запуск не создаёт дубликатов. В Development и при `OpenIddict:Seed:RefreshClients=true` веб-клиент обновляется, чтобы применить адреса возврата.
 
 | Клиент | Redirect URI | Секрет |
 |---|---|---|
@@ -51,8 +52,11 @@
 | `devhome-wpf` | `http://127.0.0.1:5181/callback` | нет (public) |
 | `devhome-web` | `https://localhost:7270/signin-oidc` | `OpenIddict:Clients:Web:Secret` |
 | `devhome-cli` | — (device code) | нет |
+| `devhome-api` | — (introspection) | `OpenIddict:Clients:Api:Secret` |
 
-Сервисный клиент `devhome-service` использует секрет `OpenIddict:Clients:Service:Secret`. В Development подставляются значения по умолчанию из `appsettings.json`; в промышленной среде задавайте секреты через user-secrets или переменные окружения.
+Сервисный клиент `devhome-service` использует секрет `OpenIddict:Clients:Service:Secret`. Клиент `devhome-api` нужен только для introspection в шаблонном API. В Development подставляются значения по умолчанию из `appsettings.json`; в промышленной среде задавайте секреты через user-secrets или переменные окружения.
+
+Запуск в Docker с локальной сетью описан в [docker.md](docker.md).
 
 ## Примеры
 

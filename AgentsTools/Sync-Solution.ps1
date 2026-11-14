@@ -63,7 +63,7 @@ $script:SolutionItemsFolderName = 'Элементы решения'
 $script:AgentFolderNames = @('AgentsDocs', 'AgentsTools')
 
 $script:IgnoredDirectoryNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-foreach ($name in @('.vs', '.git', '.idea', '.vscode', 'bin', 'obj', 'node_modules', 'temp', 'artifacts', 'TestResults', 'packages')) {
+foreach ($name in @('.vs', '.git', '.idea', '.vscode', 'bin', 'obj', 'node_modules', 'temp', 'artifacts', 'publish', 'TestResults', 'packages')) {
     [void]$script:IgnoredDirectoryNames.Add($name)
 }
 
@@ -71,6 +71,10 @@ $script:IgnoredExtensions = [System.Collections.Generic.HashSet[string]]::new([S
 foreach ($extension in @('.user', '.suo', '.tmp', '.log', '.binlog', '.bak', '.orig', '.sln', '.slnx')) {
     [void]$script:IgnoredExtensions.Add($extension)
 }
+
+# .env содержит локальные пароли и не должен попадать в решение и git.
+$script:IgnoredFileNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+[void]$script:IgnoredFileNames.Add('.env')
 
 $script:ProjectExtensions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($extension in @('.csproj', '.fsproj', '.vbproj', '.vcxproj', '.sqlproj', '.esproj', '.dcproj', '.wixproj', '.proj')) {
@@ -128,6 +132,7 @@ function Test-IgnoredFile {
     param([System.IO.FileInfo]$File, [string]$RelativePath)
 
     if ($script:IgnoredExtensions.Contains($File.Extension)) { return $true }
+    if ($script:IgnoredFileNames.Contains($File.Name)) { return $true }
     if ($File.Name.StartsWith('~$', [System.StringComparison]::Ordinal)) { return $true }
 
     $segments = $RelativePath.Split('/')
