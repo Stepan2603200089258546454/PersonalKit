@@ -1,0 +1,568 @@
+﻿@page "/admin/tokens"
+@attribute [Authorize(Roles = AdminRoles.Administrator)]
+@attribute [MenuItem("Токены", Description = "Авторизации и выданные токены", Section = AdminNavigation.Section, Icon = "bi bi-key", Roles = AdminRoles.Administrator, Order = 640)]
+@rendermode InteractiveServer
+@layout DevHome.Identity.Components.Admin.Shared.AdminLayout
+
+@inject IDbContextFactory<DBContext> DbFactory
+@inject IOpenIddictApplicationManager ApplicationManager
+@inject IOpenIddictTokenManager TokenManager
+@inject IOpenIddictAuthorizationManager AuthorizationManager
+@inject ILogger<Tokens> Logger
+
+<PageTitle>Токены OpenIddict</PageTitle>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+        <h2 class="h4 mb-1">Авторизации и токены</h2>
+        <p class="text-body-secondary mb-0 small">
+            Сеансы пользователей в клиентских приложениях. Всего записей: <strong>@total</strong>
+        </p>
+    </div>
+    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="PruneAsync">
+        <i class="bi bi-eraser me-1" aria-hidden="true"></i>Удалить просроченные
+    </button>
+</div>
+
+@if (message is not null)
+{
+    <div class="alert @(isError ? "alert-danger" : "alert-success")" role="alert">@message</div>
+}
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <button type="button" class="nav-link @(activeTab == TabAuthorizations ? "active" : null)" @onclick="() => SwitchTabAsync(TabAuthorizations)">
+            Авторизации
+        </button>
+    </li>
+    <li class="nav-item">
+        <button type="button" class="nav-link @(activeTab == TabTokens ? "active" : null)" @onclick="() => SwitchTabAsync(TabTokens)">
+            Токены
+        </button>
+    </li>
+</ul>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form class="row g-2 align-items-end" @onsubmit="SearchAsync" @onsubmit:preventDefault>
+            <div class="col-md-4">
+                <label class="form-label small text-body-secondary" for="token-subject">Пользователь (subject)</label>
+                <input id="token-subject" class="form-control" @bind="subjectFilter" placeholder="Идентификатор пользователя" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small text-body-secondary" for="token-status">Состояние</label>
+                <select id="token-status" class="form-select" @bind="statusFilter" @bind:after="SearchAsync">
+                    <option value="">Любое</option>
+                    <option value="@Statuses.Valid">действителен</option>
+                    <option value="@Statuses.Revoked">отозван</option>
+                    <option value="@Statuses.Redeemed">использован</option>
+                    <option value="@Statuses.Rejected">отклонён</option>
+                    <option value="@Statuses.Inactive">неактивен</option>
+                </select>
+            </div>
+            @if (activeTab == TabTokens)
+            {
+                <div class="col-md-3">
+                    <label class="form-label small text-body-secondary" for="token-type">Тип</label>
+                    <select id="token-type" class="form-select" @bind="typeFilter" @bind:after="SearchAsync">
+                        <option value="">Любой</option>
+                        @foreach (var type in tokenTypes)
+                        {
+                            <option value="@type">@OpenIddictPermissionCatalog.DescribeTokenType(type)</option>
+                        }
+                    </select>
+                </div>
+            }
+            <div class="col-md-2 d-flex gap-2">
+                <button type="submit" class="btn btn-outline-primary w-100">
+                    <i class="bi bi-search me-1" aria-hidden="true"></i>Найти
+                </button>
+                <button type="button" class="btn btn-outline-secondary" title="Сбросить фильтры" @onclick="ResetFiltersAsync">
+                    <i class="bi bi-x-lg" aria-hidden="true"></i>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    @if (loadError is not null)
+    {
+        <div class="alert alert-danger m-3" role="alert">@loadError</div>
+    }
+    else if (total == 0)
+    {
+        <div class="card-body text-center text-body-secondary py-5">
+            <i class="bi bi-key fs-1 d-block mb-2" aria-hidden="true"></i>
+            Записей нет.
+        </div>
+    }
+    else if (activeTab == TabAuthorizations)
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Пользователь</th>
+                        <th scope="col">Клиент</th>
+                        <th scope="col">Области</th>
+                        <th scope="col">Состояние</th>
+                        <th scope="col">Создана</th>
+                        <th scope="col" class="text-end">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in authorizations)
+                    {
+                        <tr>
+                            <td class="text-truncate" style="max-width: 12rem;">@row.Subject</td>
+                            <td><code>@(row.ClientId ?? "—")</code></td>
+                            <td class="small text-body-secondary">@string.Join(", ", row.Scopes)</td>
+                            <td>
+                                <span class="badge @OpenIddictPermissionCatalog.StatusBadgeClass(row.Status)">
+                                    @OpenIddictPermissionCatalog.DescribeStatus(row.Status)
+                                </span>
+                            </td>
+                            <td class="small text-body-secondary">@FormatDate(row.CreationDate)</td>
+                            <td class="text-end text-nowrap">
+                                <button type="button" class="btn btn-sm btn-outline-warning" disabled="@isBusy" @onclick="() => RevokeAuthorizationAsync(row.Id)">
+                                    Отозвать
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@isBusy" @onclick="() => DeleteAuthorizationAsync(row.Id)">
+                                    Удалить
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Пользователь</th>
+                        <th scope="col">Клиент</th>
+                        <th scope="col">Тип</th>
+                        <th scope="col">Состояние</th>
+                        <th scope="col">Создан</th>
+                        <th scope="col">Истекает</th>
+                        <th scope="col" class="text-end">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in tokens)
+                    {
+                        <tr>
+                            <td class="text-truncate" style="max-width: 10rem;">@(row.Subject ?? "—")</td>
+                            <td><code>@(row.ClientId ?? "—")</code></td>
+                            <td class="small">@OpenIddictPermissionCatalog.DescribeTokenType(row.Type)</td>
+                            <td>
+                                <span class="badge @OpenIddictPermissionCatalog.StatusBadgeClass(row.Status)">
+                                    @OpenIddictPermissionCatalog.DescribeStatus(row.Status)
+                                </span>
+                            </td>
+                            <td class="small text-body-secondary">@FormatDate(row.CreationDate)</td>
+                            <td class="small text-body-secondary">@FormatDate(row.ExpirationDate)</td>
+                            <td class="text-end text-nowrap">
+                                <button type="button" class="btn btn-sm btn-outline-warning" disabled="@isBusy" @onclick="() => RevokeTokenAsync(row.Id)">
+                                    Отозвать
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@isBusy" @onclick="() => DeleteTokenAsync(row.Id)">
+                                    Удалить
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @if (total > 0)
+    {
+        <div class="card-footer d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <span class="small text-body-secondary">Страница @currentPage из @TotalPages</span>
+            <div class="btn-group">
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(currentPage <= 1 || isBusy)" @onclick="PreviousPageAsync">
+                    <i class="bi bi-chevron-left" aria-hidden="true"></i>Назад
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(currentPage >= TotalPages || isBusy)" @onclick="NextPageAsync">
+                    Вперёд<i class="bi bi-chevron-right ms-1" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const string TabAuthorizations = "authorizations";
+    private const string TabTokens = "tokens";
+    private const int PageSize = 20;
+
+    private string activeTab = TabAuthorizations;
+    private string? subjectFilter;
+    private string? statusFilter;
+    private string? typeFilter;
+    private string? loadError;
+    private string? message;
+    private bool isError;
+    private bool isBusy;
+    private int currentPage = 1;
+    private int total;
+
+    private List<AuthorizationRow> authorizations = [];
+    private List<TokenRow> tokens = [];
+    private Dictionary<string, string?> clientIds = [];
+    private List<string?> tokenTypes = [];
+
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(total / (double)PageSize));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadClientIdsAsync();
+        await LoadTokenTypesAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadClientIdsAsync()
+    {
+        var result = new Dictionary<string, string?>(StringComparer.Ordinal);
+
+        await foreach (var application in ApplicationManager.ListAsync(null, null))
+        {
+            var id = await ApplicationManager.GetIdAsync(application);
+            if (string.IsNullOrEmpty(id))
+            {
+                continue;
+            }
+
+            result[id] = await ApplicationManager.GetClientIdAsync(application);
+        }
+
+        clientIds = result;
+    }
+
+    private async Task LoadTokenTypesAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        tokenTypes = await db.Set<OpenIddictEntityFrameworkCoreToken>()
+            .AsNoTracking()
+            .Where(token => token.Type != null)
+            .Select(token => token.Type)
+            .Distinct()
+            .OrderBy(type => type)
+            .ToListAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loadError = null;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            if (activeTab == TabAuthorizations)
+            {
+                var query = db.Set<OpenIddictEntityFrameworkCoreAuthorization>().AsNoTracking();
+
+                if (!string.IsNullOrWhiteSpace(subjectFilter))
+                {
+                    var subject = subjectFilter.Trim();
+                    query = query.Where(authorization => authorization.Subject == subject);
+                }
+
+                if (!string.IsNullOrWhiteSpace(statusFilter))
+                {
+                    var status = statusFilter;
+                    query = query.Where(authorization => authorization.Status == status);
+                }
+
+                total = await query.CountAsync();
+                currentPage = Math.Clamp(currentPage, 1, TotalPages);
+
+                var rows = await query
+                    .OrderByDescending(authorization => authorization.CreationDate)
+                    .Skip((currentPage - 1) * PageSize)
+                    .Take(PageSize)
+                    .Select(authorization => new
+                    {
+                        authorization.Id,
+                        authorization.Subject,
+                        authorization.Scopes,
+                        authorization.Status,
+                        authorization.CreationDate,
+                        ApplicationId = authorization.Application != null ? authorization.Application.Id : null
+                    })
+                    .ToListAsync();
+
+                authorizations = rows
+                    .Select(row => new AuthorizationRow(
+                        row.Id,
+                        row.Subject,
+                        row.ApplicationId is not null && clientIds.TryGetValue(row.ApplicationId, out var clientId) ? clientId : null,
+                        OpenIddictValueParser.ParseScopes(row.Scopes),
+                        row.Status,
+                        row.CreationDate))
+                    .ToList();
+            }
+            else
+            {
+                var query = db.Set<OpenIddictEntityFrameworkCoreToken>().AsNoTracking();
+
+                if (!string.IsNullOrWhiteSpace(subjectFilter))
+                {
+                    var subject = subjectFilter.Trim();
+                    query = query.Where(token => token.Subject == subject);
+                }
+
+                if (!string.IsNullOrWhiteSpace(statusFilter))
+                {
+                    var status = statusFilter;
+                    query = query.Where(token => token.Status == status);
+                }
+
+                if (!string.IsNullOrWhiteSpace(typeFilter))
+                {
+                    var type = typeFilter;
+                    query = query.Where(token => token.Type == type);
+                }
+
+                total = await query.CountAsync();
+                currentPage = Math.Clamp(currentPage, 1, TotalPages);
+
+                var rows = await query
+                    .OrderByDescending(token => token.CreationDate)
+                    .Skip((currentPage - 1) * PageSize)
+                    .Take(PageSize)
+                    .Select(token => new
+                    {
+                        token.Id,
+                        token.Subject,
+                        token.Type,
+                        token.Status,
+                        token.CreationDate,
+                        token.ExpirationDate,
+                        ApplicationId = token.Application != null ? token.Application.Id : null
+                    })
+                    .ToListAsync();
+
+                tokens = rows
+                    .Select(row => new TokenRow(
+                        row.Id,
+                        row.Subject,
+                        row.ApplicationId is not null && clientIds.TryGetValue(row.ApplicationId, out var clientId) ? clientId : null,
+                        row.Type,
+                        row.Status,
+                        row.CreationDate,
+                        row.ExpirationDate))
+                    .ToList();
+            }
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось загрузить токены OpenIddict.");
+            loadError = $"Не удалось загрузить записи: {exception.Message}";
+            authorizations = [];
+            tokens = [];
+            total = 0;
+        }
+    }
+
+    private async Task SwitchTabAsync(string tab)
+    {
+        if (activeTab == tab)
+        {
+            return;
+        }
+
+        activeTab = tab;
+        currentPage = 1;
+        message = null;
+        await LoadAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        currentPage = 1;
+        await LoadAsync();
+    }
+
+    private async Task ResetFiltersAsync()
+    {
+        subjectFilter = null;
+        statusFilter = null;
+        typeFilter = null;
+        await SearchAsync();
+    }
+
+    private async Task PreviousPageAsync()
+    {
+        if (currentPage <= 1)
+        {
+            return;
+        }
+
+        currentPage--;
+        await LoadAsync();
+    }
+
+    private async Task NextPageAsync()
+    {
+        if (currentPage >= TotalPages)
+        {
+            return;
+        }
+
+        currentPage++;
+        await LoadAsync();
+    }
+
+    private async Task RevokeAuthorizationAsync(string? id)
+    {
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var authorization = await AuthorizationManager.FindByIdAsync(id);
+            if (authorization is not null)
+            {
+                await AuthorizationManager.TryRevokeAsync(authorization);
+            }
+
+            SetSuccess("Авторизация отозвана.");
+            await LoadAsync();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task DeleteAuthorizationAsync(string? id)
+    {
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var authorization = await AuthorizationManager.FindByIdAsync(id);
+            if (authorization is not null)
+            {
+                await AuthorizationManager.DeleteAsync(authorization);
+            }
+
+            SetSuccess("Авторизация удалена.");
+            await LoadAsync();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task RevokeTokenAsync(string? id)
+    {
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var token = await TokenManager.FindByIdAsync(id);
+            if (token is not null)
+            {
+                await TokenManager.TryRevokeAsync(token);
+            }
+
+            SetSuccess("Токен отозван.");
+            await LoadAsync();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task DeleteTokenAsync(string? id)
+    {
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var token = await TokenManager.FindByIdAsync(id);
+            if (token is not null)
+            {
+                await TokenManager.DeleteAsync(token);
+            }
+
+            SetSuccess("Токен удалён.");
+            await LoadAsync();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task PruneAsync()
+    {
+        isBusy = true;
+        try
+        {
+            var threshold = DateTimeOffset.UtcNow;
+            await TokenManager.PruneAsync(threshold);
+            await AuthorizationManager.PruneAsync(threshold);
+
+            SetSuccess("Просроченные токены и авторизации удалены.");
+            await LoadAsync();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void SetSuccess(string text)
+    {
+        message = text;
+        isError = false;
+    }
+
+    private static string FormatDate(DateTimeOffset? value) =>
+        value is null ? "—" : value.Value.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
+
+    private sealed record AuthorizationRow(
+        string? Id,
+        string? Subject,
+        string? ClientId,
+        string[] Scopes,
+        string? Status,
+        DateTimeOffset? CreationDate);
+
+    private sealed record TokenRow(
+        string? Id,
+        string? Subject,
+        string? ClientId,
+        string? Type,
+        string? Status,
+        DateTimeOffset? CreationDate,
+        DateTimeOffset? ExpirationDate);
+}

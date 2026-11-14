@@ -1,33 +1,90 @@
-﻿@page "/Account/Manage/PersonalData"
+@page "/Account/Manage/PersonalData"
+@attribute [MenuItem("Личные данные", Description = "Скачивание и удаление данных учётной записи", Section = "Аккаунт", Icon = "bi bi-database-lock", RequiresAuthorization = true, Order = 520)]
 
+@using System.ComponentModel.DataAnnotations
 @using Microsoft.AspNetCore.Identity
 @using DevHome.Identity.DataContext.Models
 
 @inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
 @inject IdentityRedirectManager RedirectManager
+@inject NavigationManager NavigationManager
+@inject ILogger<PersonalData> Logger
 
-<PageTitle>Персональные данные</PageTitle>
+<PageTitle>Личные данные</PageTitle>
 
-<StatusMessage Message="@message" />
-<h3>Персональные данные</h3>
+<h2 class="h4 mb-3">Личные данные</h2>
 
-<div class="row">
-    <div class="col-md-6">
-        <p>Ваша учётная запись содержит персональные данные, которые вы нам предоставили. На этой странице вы можете скачать или удалить эти данные.</p>
-        <p>
-            <strong>Удаление этих данных приведёт к безвозвратному удалению вашей учётной записи, и восстановить её будет невозможно.</strong>
-        </p>
-        <form action="Account/Manage/DownloadPersonalData" method="post">
-            <button class="btn btn-primary" type="submit">Скачать</button>
-        </form>
-        <p>
-            <a href="Account/Manage/DeletePersonalData" class="btn btn-danger">Удалить</a>
-        </p>
+@if (message is not null)
+{
+    <div class="alert @(isError ? "alert-danger" : "alert-success")" role="alert">@message</div>
+}
+
+<div class="row g-4">
+    <div class="col-xl-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">Скачивание данных</div>
+            <div class="card-body">
+                <p class="small text-body-secondary">
+                    Учётная запись хранит адрес электронной почты, телефон, привязки внешних входов
+                    и настройки двухфакторной аутентификации. Вы можете получить их в формате JSON.
+                </p>
+                <form action="Account/Manage/DownloadPersonalData" method="post">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn btn-outline-primary">
+                        <i class="bi bi-download me-1" aria-hidden="true"></i>Скачать копию данных
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-6">
+        <div class="card border-danger h-100">
+            <div class="card-header fw-semibold text-danger">Удаление учётной записи</div>
+            <div class="card-body">
+                <div class="alert alert-warning small" role="alert">
+                    Удаление необратимо: учётная запись, привязки и ключи доступа будут потеряны.
+                </div>
+
+                <EditForm Model="Input" FormName="delete-user" OnValidSubmit="OnDeleteAsync" method="post">
+                    <DataAnnotationsValidator />
+                    <div role="alert" aria-atomic="true">
+                        <ValidationSummary class="text-danger" />
+                    </div>
+
+                    @if (requirePassword)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label" for="delete-password">Пароль</label>
+                            <InputText id="delete-password" type="password" class="form-control" @bind-Value="Input.Password" autocomplete="current-password" />
+                            <ValidationMessage For="() => Input.Password" class="text-danger small" />
+                        </div>
+                    }
+
+                    <div class="form-check mb-3">
+                        <InputCheckbox id="delete-confirm" class="form-check-input" @bind-Value="Input.Confirm" />
+                        <label class="form-check-label" for="delete-confirm">
+                            Я понимаю, что учётная запись будет удалена безвозвратно
+                        </label>
+                        <ValidationMessage For="() => Input.Confirm" class="text-danger small" />
+                    </div>
+
+                    <button type="submit" class="btn btn-danger" disabled="@isBusy">
+                        <i class="bi bi-trash me-1" aria-hidden="true"></i>Удалить данные и закрыть учётную запись
+                    </button>
+                </EditForm>
+            </div>
+        </div>
     </div>
 </div>
 
 @code {
     private string? message;
+    private bool isError;
+    private bool isBusy;
+    private ApplicationUser? user;
+    private bool requirePassword;
 
     [CascadingParameter]
     private HttpContext HttpContext { get; set; } = default!;
@@ -35,15 +92,74 @@
     [SupplyParameterFromTempData(Name = IdentityRedirectManager.StatusMessageKey)]
     private string? IdentityStatusMessage { get; set; }
 
+    [SupplyParameterFromForm]
+    private DeleteInput Input { get; set; } = default!;
+
     protected override async Task OnInitializedAsync()
     {
         message = IdentityStatusMessage;
         IdentityStatusMessage = null;
+        Input ??= new();
 
-        var user = await UserManager.GetUserAsync(HttpContext.User);
+        user = await UserManager.GetUserAsync(HttpContext.User);
         if (user is null)
         {
             RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
         }
+
+        requirePassword = await UserManager.HasPasswordAsync(user);
+    }
+
+    private async Task OnDeleteAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
+        }
+
+        if (requirePassword && !await UserManager.CheckPasswordAsync(user, Input.Password))
+        {
+            SetError("Неверный пароль.");
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var userId = await UserManager.GetUserIdAsync(user);
+            var result = await UserManager.DeleteAsync(user);
+            if (!result.Succeeded)
+            {
+                SetError("Не удалось удалить учётную запись: " + string.Join(" ", result.Errors.Select(error => error.Description)));
+                return;
+            }
+
+            await SignInManager.SignOutAsync();
+            Logger.LogInformation("Пользователь с идентификатором '{UserId}' удалил свою учётную запись.", userId);
+
+            NavigationManager.NavigateTo("/");
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void SetError(string text)
+    {
+        message = text;
+        isError = true;
+    }
+
+    private sealed class DeleteInput
+    {
+        [DataType(DataType.Password)]
+        [Display(Name = "Пароль")]
+        public string Password { get; set; } = "";
+
+        [Range(typeof(bool), "true", "true", ErrorMessage = "Подтвердите удаление учётной записи.")]
+        public bool Confirm { get; set; }
     }
 }

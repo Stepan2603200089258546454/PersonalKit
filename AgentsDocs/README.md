@@ -18,4 +18,6 @@
   регистрация в DI, формат `appsettings.json`, поведение таймаутов, повторов и предохранителя.
 - `devhome-oauth.md` — вход в DevHome через DevHome.Identity: сценарии, клиенты, запуск.
 - `openiddict-reference.md` — настройки и функции OpenIddict: что за что отвечает.
+- `identity-administration.md` — админ-панель и личный кабинет `DevHome.Identity`:
+  роли, страницы управления пользователями и OpenIddict, объединённые маршруты.
 - `common-ui.md` — библиотека компонентов `Common.UI`: меню, темы, атрибуты страниц.

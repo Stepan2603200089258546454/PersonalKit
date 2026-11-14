@@ -1,0 +1,546 @@
+﻿@page "/admin/clients/new"
+@page "/admin/clients/{Id}"
+@attribute [Authorize(Roles = AdminRoles.Administrator)]
+@attribute [MenuItem("Клиент", Section = AdminNavigation.Section, Roles = AdminRoles.Administrator, Hidden = true)]
+@rendermode InteractiveServer
+@layout DevHome.Identity.Components.Admin.Shared.AdminLayout
+
+@inject IOpenIddictApplicationManager ApplicationManager
+@inject IOpenIddictTokenManager TokenManager
+@inject IOpenIddictAuthorizationManager AuthorizationManager
+@inject NavigationManager Navigation
+@inject ILogger<ClientEdit> Logger
+
+<PageTitle>@(isNew ? "Новый клиент" : model.ClientId)</PageTitle>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+        <h2 class="h4 mb-1">@(isNew ? "Новый клиент" : "Клиентское приложение")</h2>
+        @if (!isNew)
+        {
+            <p class="text-body-secondary mb-0 small">
+                <code>@model.ClientId</code>
+                @if (secretSet)
+                {
+                    <span class="badge text-bg-secondary ms-1">секрет задан</span>
+                }
+            </p>
+        }
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="@AdminNavigation.Clients">
+        <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>К списку
+    </a>
+</div>
+
+@if (notFound)
+{
+    <div class="alert alert-warning" role="alert">Клиент не найден. Возможно, его удалили.</div>
+}
+else
+{
+    @if (message is not null)
+    {
+        <div class="alert @(isError ? "alert-danger" : "alert-success")" role="alert">@message</div>
+    }
+
+    <EditForm Model="model" OnValidSubmit="SaveAsync" FormName="client">
+        <DataAnnotationsValidator />
+
+        <div class="row g-4">
+            <div class="col-xl-7">
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Основные сведения</div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label" for="client-id">Client ID</label>
+                                <InputText id="client-id" class="form-control" @bind-Value="model.ClientId" autocomplete="off" />
+                                <div class="form-text">Логин приложения. Не секретный, виден в запросе на вход.</div>
+                                <ValidationMessage For="() => model.ClientId" class="text-danger small" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="client-name">Название</label>
+                                <InputText id="client-name" class="form-control" @bind-Value="model.DisplayName" autocomplete="off" />
+                                <div class="form-text">Показывается пользователю, если включён экран согласия.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="client-type">Тип клиента</label>
+                                <select id="client-type" class="form-select" @bind="model.ClientType">
+                                    @foreach (var option in OpenIddictPermissionCatalog.ClientTypeOptions)
+                                    {
+                                        <option value="@option.Value">@option.Title</option>
+                                    }
+                                </select>
+                                <div class="form-text">
+                                    @OpenIddictPermissionCatalog.ClientTypeOptions.First(option => option.Value == model.ClientType).Hint
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="client-consent">Согласие</label>
+                                <select id="client-consent" class="form-select" @bind="model.ConsentType">
+                                    @foreach (var option in OpenIddictPermissionCatalog.ConsentTypeOptions)
+                                    {
+                                        <option value="@option.Value">@option.Title</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+
+                        <hr class="my-4" />
+
+                        <div class="mb-3">
+                            <label class="form-label" for="client-secret">
+                                @(isNew ? "Секрет клиента" : "Новый секрет клиента")
+                            </label>
+                            <InputText id="client-secret" type="password" class="form-control" @bind-Value="model.NewSecret" autocomplete="new-password" />
+                            <div class="form-text">
+                                @if (isNew)
+                                {
+                                    <span>Для конфиденциального клиента секрет обязателен, для публичного — не используется.</span>
+                                }
+                                else if (secretSet)
+                                {
+                                    <span>Оставьте пустым, чтобы не менять. Новое значение заменит текущий секрет.</span>
+                                }
+                                else
+                                {
+                                    <span>Секрет не задан. Заполните поле, чтобы клиент мог проходить проверку client_secret.</span>
+                                }
+                            </div>
+                            @if (!isNew && secretSet)
+                            {
+                                <div class="form-check mt-2">
+                                    <InputCheckbox id="client-secret-remove" class="form-check-input" @bind-Value="model.RemoveSecret" />
+                                    <label class="form-check-label" for="client-secret-remove">Удалить текущий секрет</label>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Адреса возврата</div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label" for="client-redirects">Redirect URI — по одному в строке</label>
+                            <textarea id="client-redirects" class="form-control font-monospace" rows="4" @bind="model.RedirectUris"
+                                      placeholder="https://localhost:7270/signin-oidc"></textarea>
+                            <div class="form-text">Должны совпадать с адресом клиента символ в символ.</div>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label" for="client-post-logout">Post-logout redirect URI — по одному в строке</label>
+                            <textarea id="client-post-logout" class="form-control font-monospace" rows="3" @bind="model.PostLogoutRedirectUris"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header fw-semibold">Разрешения</div>
+                    <div class="card-body">
+                        <PermissionGroup Title="Конечные точки" Options="@OpenIddictPermissionCatalog.Endpoints"
+                                         Selected="@permissions" OnToggle="change => Toggle(permissions, change)" />
+                        <PermissionGroup Title="Сценарии получения токена" Options="@OpenIddictPermissionCatalog.GrantTypes"
+                                         Selected="@permissions" OnToggle="change => Toggle(permissions, change)" />
+                        <PermissionGroup Title="Типы ответа" Options="@OpenIddictPermissionCatalog.ResponseTypes"
+                                         Selected="@permissions" OnToggle="change => Toggle(permissions, change)" />
+                        <PermissionGroup Title="Области" Options="@OpenIddictPermissionCatalog.Scopes"
+                                         Selected="@permissions" OnToggle="change => Toggle(permissions, change)" />
+                        <PermissionGroup Title="Требования" Options="@OpenIddictPermissionCatalog.Requirements"
+                                         Selected="@requirements" OnToggle="change => Toggle(requirements, change)" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-xl-5">
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Подсказка</div>
+                    <div class="card-body small text-body-secondary">
+                        <p>
+                            Публичному клиенту (SPA, MAUI, WPF) достаточно адреса возврата, PKCE и
+                            разрешений на authorization code.
+                        </p>
+                        <p>
+                            Сервисному клиенту нужны только <code>gt:client_credentials</code> и
+                            <code>ept:token</code>: пользователя в таком сценарии нет.
+                        </p>
+                        <p class="mb-0">
+                            Области <code>openid</code> и <code>offline_access</code> управляют
+                            identity-токеном и refresh-токеном соответственно.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="d-grid gap-2 mb-4">
+                    <button type="submit" class="btn btn-primary" disabled="@isBusy">
+                        <i class="bi bi-check-lg me-1" aria-hidden="true"></i>@(isNew ? "Создать клиента" : "Сохранить")
+                    </button>
+                    <a class="btn btn-outline-secondary" href="@AdminNavigation.Clients">Отмена</a>
+                </div>
+
+                @if (!isNew)
+                {
+                    <div class="card border-danger">
+                        <div class="card-header fw-semibold text-danger">Удаление клиента</div>
+                        <div class="card-body">
+                            @if (!confirmDelete)
+                            {
+                                <p class="small text-body-secondary">Клиент будет удалён, его токены и авторизации отозваны.</p>
+                                <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => confirmDelete = true">
+                                    <i class="bi bi-trash me-1" aria-hidden="true"></i>Удалить клиента
+                                </button>
+                            }
+                            else
+                            {
+                                <p class="small text-danger">Подтвердите удаление: <code>@model.ClientId</code></p>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-danger btn-sm" disabled="@isBusy" @onclick="DeleteAsync">
+                                        Да, удалить
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => confirmDelete = false">
+                                        Отмена
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </EditForm>
+}
+
+@code {
+    [Parameter]
+    public string? Id { get; set; }
+
+    private object? application;
+    private string? originalClientId;
+    private ClientModel model = new();
+    private HashSet<string> permissions = new(StringComparer.Ordinal);
+    private HashSet<string> requirements = new(StringComparer.Ordinal);
+    private bool isNew;
+    private bool notFound;
+    private bool secretSet;
+    private bool isBusy;
+    private bool confirmDelete;
+    private bool isError;
+    private string? message;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isNew = string.IsNullOrWhiteSpace(Id);
+        notFound = false;
+        message = null;
+        isError = false;
+        confirmDelete = false;
+
+        if (isNew)
+        {
+            model = new ClientModel
+            {
+                ClientType = ClientTypes.Public,
+                ConsentType = ConsentTypes.Implicit
+            };
+            permissions = new HashSet<string>(StringComparer.Ordinal)
+            {
+                Permissions.Endpoints.Authorization,
+                Permissions.Endpoints.Token,
+                Permissions.Endpoints.EndSession,
+                Permissions.GrantTypes.AuthorizationCode,
+                Permissions.GrantTypes.RefreshToken,
+                Permissions.ResponseTypes.Code,
+                Permissions.Scopes.Profile,
+                Permissions.Scopes.Email,
+                Permissions.Prefixes.Scope + OpenIddictConstants.Scopes.OfflineAccess,
+                Permissions.Prefixes.Scope + DevHomeScopes.Api
+            };
+            requirements = new HashSet<string>(StringComparer.Ordinal)
+            {
+                Requirements.Features.ProofKeyForCodeExchange
+            };
+            return;
+        }
+
+        application = await ApplicationManager.FindByIdAsync(Id!);
+        if (application is null)
+        {
+            notFound = true;
+            return;
+        }
+
+        var descriptor = new OpenIddictApplicationDescriptor();
+        await ApplicationManager.PopulateAsync(descriptor, application);
+
+        model = new ClientModel
+        {
+            ClientId = descriptor.ClientId ?? string.Empty,
+            DisplayName = descriptor.DisplayName,
+            ClientType = descriptor.ClientType ?? ClientTypes.Public,
+            ConsentType = descriptor.ConsentType ?? ConsentTypes.Implicit,
+            RedirectUris = string.Join(Environment.NewLine, descriptor.RedirectUris.Select(uri => uri.OriginalString)),
+            PostLogoutRedirectUris = string.Join(Environment.NewLine, descriptor.PostLogoutRedirectUris.Select(uri => uri.OriginalString))
+        };
+
+        originalClientId = descriptor.ClientId;
+        permissions = new HashSet<string>(descriptor.Permissions, StringComparer.Ordinal);
+        requirements = new HashSet<string>(descriptor.Requirements, StringComparer.Ordinal);
+        secretSet = descriptor.ClientSecret is not null;
+    }
+
+    private async Task SaveAsync()
+    {
+        isBusy = true;
+        message = null;
+
+        try
+        {
+            var clientId = model.ClientId.Trim();
+
+            if (!TryParseUris(model.RedirectUris, out var redirectUris, out var redirectError))
+            {
+                SetError(redirectError!);
+                return;
+            }
+
+            if (!TryParseUris(model.PostLogoutRedirectUris, out var postLogoutUris, out var logoutError))
+            {
+                SetError(logoutError!);
+                return;
+            }
+
+            if (isNew)
+            {
+                if (await ApplicationManager.FindByClientIdAsync(clientId) is not null)
+                {
+                    SetError($"Клиент с идентификатором «{clientId}» уже существует.");
+                    return;
+                }
+
+                var descriptor = new OpenIddictApplicationDescriptor
+                {
+                    ClientId = clientId,
+                    ClientType = model.ClientType,
+                    ConsentType = model.ConsentType,
+                    DisplayName = string.IsNullOrWhiteSpace(model.DisplayName) ? null : model.DisplayName.Trim(),
+                    ClientSecret = string.IsNullOrWhiteSpace(model.NewSecret) ? null : model.NewSecret
+                };
+
+                FillDescriptor(descriptor, redirectUris, postLogoutUris);
+
+                if (model.ClientType == ClientTypes.Confidential && string.IsNullOrWhiteSpace(descriptor.ClientSecret))
+                {
+                    SetError("Для конфиденциального клиента задайте секрет.");
+                    return;
+                }
+
+                await ApplicationManager.CreateAsync(descriptor);
+
+                var created = await ApplicationManager.FindByClientIdAsync(clientId);
+                Logger.LogInformation("Администратор создал клиента OpenIddict {ClientId}.", clientId);
+
+                if (created is not null && await ApplicationManager.GetIdAsync(created) is { } createdId)
+                {
+                    Navigation.NavigateTo(AdminNavigation.Client(createdId));
+                }
+                else
+                {
+                    Navigation.NavigateTo(AdminNavigation.Clients);
+                }
+
+                return;
+            }
+
+            if (application is null)
+            {
+                return;
+            }
+
+            if (!string.Equals(clientId, originalClientId, StringComparison.Ordinal) &&
+                await ApplicationManager.FindByClientIdAsync(clientId) is not null)
+            {
+                SetError($"Клиент с идентификатором «{clientId}» уже существует.");
+                return;
+            }
+
+            var existing = new OpenIddictApplicationDescriptor();
+            await ApplicationManager.PopulateAsync(existing, application);
+
+            existing.ClientId = clientId;
+            existing.ClientType = model.ClientType;
+            existing.ConsentType = model.ConsentType;
+            existing.DisplayName = string.IsNullOrWhiteSpace(model.DisplayName) ? null : model.DisplayName.Trim();
+
+            if (!string.IsNullOrWhiteSpace(model.NewSecret))
+            {
+                existing.ClientSecret = model.NewSecret;
+            }
+
+            if (model.RemoveSecret || model.ClientType == ClientTypes.Public)
+            {
+                existing.ClientSecret = null;
+            }
+
+            if (model.ClientType == ClientTypes.Confidential && string.IsNullOrEmpty(existing.ClientSecret))
+            {
+                SetError("Для конфиденциального клиента задайте секрет.");
+                return;
+            }
+
+            existing.Permissions.Clear();
+            existing.Permissions.UnionWith(permissions);
+            existing.Requirements.Clear();
+            existing.Requirements.UnionWith(requirements);
+            existing.RedirectUris.Clear();
+            foreach (var uri in redirectUris)
+            {
+                existing.RedirectUris.Add(uri);
+            }
+
+            existing.PostLogoutRedirectUris.Clear();
+            foreach (var uri in postLogoutUris)
+            {
+                existing.PostLogoutRedirectUris.Add(uri);
+            }
+
+            await ApplicationManager.UpdateAsync(application, existing);
+
+            secretSet = existing.ClientSecret is not null;
+            model.NewSecret = null;
+            model.RemoveSecret = false;
+            SetSuccess("Клиент сохранён.");
+        }
+        catch (Exception exception) when (exception is OpenIddictExceptions.ValidationException or InvalidOperationException)
+        {
+            Logger.LogWarning(exception, "Не удалось сохранить клиента OpenIddict.");
+            SetError(exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (application is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var id = await ApplicationManager.GetIdAsync(application);
+
+            if (!string.IsNullOrEmpty(id))
+            {
+                await TokenManager.RevokeByApplicationIdAsync(id);
+                await AuthorizationManager.RevokeByApplicationIdAsync(id);
+            }
+
+            await ApplicationManager.DeleteAsync(application);
+
+            Logger.LogInformation("Администратор удалил клиента OpenIddict {ClientId}.", model.ClientId);
+            Navigation.NavigateTo(AdminNavigation.Clients);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void FillDescriptor(OpenIddictApplicationDescriptor descriptor, IEnumerable<Uri> redirectUris, IEnumerable<Uri> postLogoutUris)
+    {
+        descriptor.Permissions.Clear();
+        descriptor.Permissions.UnionWith(permissions);
+        descriptor.Requirements.Clear();
+        descriptor.Requirements.UnionWith(requirements);
+
+        foreach (var uri in redirectUris)
+        {
+            descriptor.RedirectUris.Add(uri);
+        }
+
+        foreach (var uri in postLogoutUris)
+        {
+            descriptor.PostLogoutRedirectUris.Add(uri);
+        }
+    }
+
+    private static void Toggle(HashSet<string> set, (string Value, bool Selected) change)
+    {
+        if (change.Selected)
+        {
+            set.Add(change.Value);
+        }
+        else
+        {
+            set.Remove(change.Value);
+        }
+    }
+
+    private static bool TryParseUris(string? text, out List<Uri> uris, out string? error)
+    {
+        uris = [];
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+
+        foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!Uri.TryCreate(line, UriKind.Absolute, out var uri))
+            {
+                error = $"Некорректный адрес: «{line}». Нужен абсолютный URI, например https://localhost:5149/signin-oidc.";
+                return false;
+            }
+
+            uris.Add(uri);
+        }
+
+        return true;
+    }
+
+    private void SetSuccess(string text)
+    {
+        message = text;
+        isError = false;
+    }
+
+    private void SetError(string text)
+    {
+        message = text;
+        isError = true;
+    }
+
+    private sealed class ClientModel
+    {
+        [Required(ErrorMessage = "Укажите Client ID.")]
+        [RegularExpression("^[A-Za-z0-9._~-]+$", ErrorMessage = "Client ID может содержать латинские буквы, цифры, точку, дефис, подчёркивание и тильду.")]
+        [Display(Name = "Client ID")]
+        public string ClientId { get; set; } = "";
+
+        [Display(Name = "Название")]
+        public string? DisplayName { get; set; }
+
+        [Required]
+        [Display(Name = "Тип клиента")]
+        public string ClientType { get; set; } = ClientTypes.Public;
+
+        [Required]
+        [Display(Name = "Согласие")]
+        public string ConsentType { get; set; } = ConsentTypes.Implicit;
+
+        public string? RedirectUris { get; set; }
+
+        public string? PostLogoutRedirectUris { get; set; }
+
+        [DataType(DataType.Password)]
+        [Display(Name = "Секрет клиента")]
+        public string? NewSecret { get; set; }
+
+        public bool RemoveSecret { get; set; }
+    }
+}

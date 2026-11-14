@@ -21,7 +21,7 @@
                 <div class="d-flex flex-wrap gap-2">
                     <a class="btn btn-primary btn-sm" href="Account/Login">Войти</a>
                     <a class="btn btn-outline-secondary btn-sm" href="Account/Register">Регистрация</a>
-                    <a class="btn btn-outline-secondary btn-sm" href="Account/Manage">Профиль</a>
+                    <a class="btn btn-outline-secondary btn-sm" href="Account/Manage">Личный кабинет</a>
                 </div>
             </div>
         </div>
@@ -43,4 +43,20 @@
             </div>
         </div>
     </div>
+
+    <AuthorizeView Roles="Admin">
+        <Authorized>
+            <div class="col-md-6">
+                <div class="card h-100 border-primary-subtle">
+                    <div class="card-body">
+                        <h2 class="h6 card-title">Администрирование</h2>
+                        <p class="card-text text-body-secondary small">
+                            Пользователи, клиенты, области и токены OpenIddict.
+                        </p>
+                        <a class="btn btn-primary btn-sm" href="/admin">Открыть админку</a>
+                    </div>
+                </div>
+            </div>
+        </Authorized>
+    </AuthorizeView>
 </div>

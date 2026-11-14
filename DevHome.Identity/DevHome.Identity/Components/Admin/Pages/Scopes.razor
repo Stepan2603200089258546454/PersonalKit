@@ -1,0 +1,217 @@
+@page "/admin/scopes"
+@attribute [Authorize(Roles = AdminRoles.Administrator)]
+@attribute [MenuItem("Области", Description = "Области доступа OpenIddict", Section = AdminNavigation.Section, Icon = "bi bi-bounding-box-circles", Roles = AdminRoles.Administrator, Order = 630)]
+@rendermode InteractiveServer
+@layout DevHome.Identity.Components.Admin.Shared.AdminLayout
+
+@inject IOpenIddictScopeManager ScopeManager
+@inject ILogger<Scopes> Logger
+
+<PageTitle>Области OpenIddict</PageTitle>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+        <h2 class="h4 mb-1">Области доступа</h2>
+        <p class="text-body-secondary mb-0 small">
+            Область — это разрешение на часть данных: <code>openid</code>, <code>profile</code>, <code>devhome.api</code>.
+        </p>
+    </div>
+</div>
+
+@if (message is not null)
+{
+    <div class="alert @(isError ? "alert-danger" : "alert-success")" role="alert">@message</div>
+}
+
+<div class="row g-4">
+    <div class="col-xl-8">
+        <div class="card">
+            <div class="card-header fw-semibold">Зарегистрированные области</div>
+            @if (scopes.Count == 0)
+            {
+                <div class="card-body text-body-secondary">Области не зарегистрированы.</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th scope="col">Имя</th>
+                                <th scope="col">Название</th>
+                                <th scope="col">Ресурсы</th>
+                                <th scope="col" class="text-end">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var scope in scopes)
+                            {
+                                <tr>
+                                    <td><code>@scope.Name</code></td>
+                                    <td>
+                                        <div>@(scope.DisplayName ?? "—")</div>
+                                        @if (!string.IsNullOrWhiteSpace(scope.Description))
+                                        {
+                                            <div class="small text-body-secondary">@scope.Description</div>
+                                        }
+                                    </td>
+                                    <td class="small text-body-secondary">@string.Join(", ", scope.Resources)</td>
+                                    <td class="text-end">
+                                        <a class="btn btn-sm btn-outline-primary" href="@AdminNavigation.Scope(scope.Id)">
+                                            <i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Изменить
+                                        </a>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="col-xl-4">
+        <div class="card">
+            <div class="card-header fw-semibold">Новая область</div>
+            <div class="card-body">
+                <EditForm Model="create" OnValidSubmit="CreateAsync" FormName="create-scope">
+                    <DataAnnotationsValidator />
+                    <div class="mb-3">
+                        <label class="form-label" for="scope-name">Имя</label>
+                        <InputText id="scope-name" class="form-control font-monospace" @bind-Value="create.Name" autocomplete="off" />
+                        <div class="form-text">Строка, которую клиент пишет в <code>scope</code>.</div>
+                        <ValidationMessage For="() => create.Name" class="text-danger small" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="scope-title">Название</label>
+                        <InputText id="scope-title" class="form-control" @bind-Value="create.DisplayName" autocomplete="off" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="scope-description">Описание</label>
+                        <textarea id="scope-description" class="form-control" rows="2" @bind="create.Description"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="scope-resources">Ресурсы — по одному в строке</label>
+                        <textarea id="scope-resources" class="form-control font-monospace" rows="2" @bind="create.Resources"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100" disabled="@isBusy">
+                        <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Добавить область
+                    </button>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<ScopeRow> scopes = [];
+    private ScopeCreateModel create = new();
+    private bool isBusy;
+    private bool isError;
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var result = new List<ScopeRow>();
+
+        await foreach (var scope in ScopeManager.ListAsync(null, null))
+        {
+            var descriptor = new OpenIddictScopeDescriptor();
+            await ScopeManager.PopulateAsync(descriptor, scope);
+
+            result.Add(new ScopeRow(
+                await ScopeManager.GetIdAsync(scope),
+                descriptor.Name,
+                descriptor.DisplayName,
+                descriptor.Description,
+                descriptor.Resources.OrderBy(resource => resource, StringComparer.Ordinal).ToArray()));
+        }
+
+        scopes = result.OrderBy(scope => scope.Name, StringComparer.Ordinal).ToList();
+    }
+
+    private async Task CreateAsync()
+    {
+        isBusy = true;
+        message = null;
+
+        try
+        {
+            var name = create.Name.Trim();
+
+            if (await ScopeManager.FindByNameAsync(name) is not null)
+            {
+                SetError($"Область «{name}» уже существует.");
+                return;
+            }
+
+            var descriptor = new OpenIddictScopeDescriptor
+            {
+                Name = name,
+                DisplayName = string.IsNullOrWhiteSpace(create.DisplayName) ? null : create.DisplayName.Trim(),
+                Description = string.IsNullOrWhiteSpace(create.Description) ? null : create.Description.Trim()
+            };
+
+            foreach (var resource in SplitLines(create.Resources))
+            {
+                descriptor.Resources.Add(resource);
+            }
+
+            await ScopeManager.CreateAsync(descriptor);
+            Logger.LogInformation("Администратор создал область OpenIddict {Scope}.", name);
+
+            create = new ScopeCreateModel();
+            await LoadAsync();
+            SetSuccess($"Область «{name}» добавлена.");
+        }
+        catch (Exception exception) when (exception is OpenIddictExceptions.ValidationException or InvalidOperationException)
+        {
+            Logger.LogWarning(exception, "Не удалось создать область OpenIddict.");
+            SetError(exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private static IEnumerable<string> SplitLines(string? text) =>
+        (text ?? string.Empty)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.Ordinal);
+
+    private void SetSuccess(string text)
+    {
+        message = text;
+        isError = false;
+    }
+
+    private void SetError(string text)
+    {
+        message = text;
+        isError = true;
+    }
+
+    private sealed record ScopeRow(string? Id, string? Name, string? DisplayName, string? Description, string[] Resources);
+
+    private sealed class ScopeCreateModel
+    {
+        [Required(ErrorMessage = "Укажите имя области.")]
+        [RegularExpression("^[A-Za-z0-9._-]+$", ErrorMessage = "Имя области может содержать латинские буквы, цифры, точку, дефис и подчёркивание.")]
+        [Display(Name = "Имя")]
+        public string Name { get; set; } = "";
+
+        [Display(Name = "Название")]
+        public string? DisplayName { get; set; }
+
+        [Display(Name = "Описание")]
+        public string? Description { get; set; }
+
+        public string? Resources { get; set; }
+    }
+}

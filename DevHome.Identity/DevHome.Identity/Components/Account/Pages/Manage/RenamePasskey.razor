@@ -68,7 +68,7 @@
         catch (FormatException)
         {
             IdentityStatusMessage = "Ошибка: указанный идентификатор ключа доступа имеет неверный формат.";
-            RedirectManager.RedirectTo("Account/Manage/Passkeys");
+            RedirectManager.RedirectTo("Account/Manage/Security");
             return;
         }
 
@@ -76,7 +76,7 @@
         if (passkey is null)
         {
             IdentityStatusMessage = "Ошибка: указанный ключ доступа не найден.";
-            RedirectManager.RedirectTo("Account/Manage/Passkeys");
+            RedirectManager.RedirectTo("Account/Manage/Security");
             return;
         }
     }
@@ -88,12 +88,12 @@
         if (!result.Succeeded)
         {
             IdentityStatusMessage = "Ошибка: не удалось обновить ключ доступа.";
-            RedirectManager.RedirectTo("Account/Manage/Passkeys");
+            RedirectManager.RedirectTo("Account/Manage/Security");
             return;
         }
 
         IdentityStatusMessage = "Ключ доступа успешно обновлён.";
-        RedirectManager.RedirectTo("Account/Manage/Passkeys");
+        RedirectManager.RedirectTo("Account/Manage/Security");
     }
 
     private sealed class InputModel

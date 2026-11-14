@@ -1,5 +1,7 @@
+﻿using DevHome.Identity.Administration;
 using DevHome.Identity.DataContext.Models;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -39,10 +41,7 @@ public static class OpenIddictSeeder
         await EnsureWebClientAsync(applicationManager, configuration, environment);
         await EnsureServiceClientAsync(applicationManager, configuration, environment);
 
-        if (environment.IsDevelopment())
-        {
-            await EnsureDemoUserAsync(scope.ServiceProvider, configuration);
-        }
+        await EnsureUsersAsync(scope.ServiceProvider, configuration, environment);
     }
 
     private static async Task EnsureScopeAsync(IOpenIddictScopeManager manager)
@@ -255,47 +254,127 @@ public static class OpenIddictSeeder
         });
     }
 
-    private static async Task EnsureDemoUserAsync(IServiceProvider services, IConfiguration configuration)
+    /// <summary>
+    /// Создаёт роли и демонстрационного пользователя, а также назначает администратора.
+    /// </summary>
+    /// <remarks>
+    /// Администратором становится пользователь с почтой из <c>Identity:Admin:Email</c>.
+    /// В Development, если ключ не задан, администратором назначается демо-пользователь.
+    /// Так админка доступна сразу после первого запуска, а в рабочем окружении
+    /// администратор задаётся явно в настройках или переменной окружения.
+    /// </remarks>
+    private static async Task EnsureUsersAsync(
+        IServiceProvider services,
+        IConfiguration configuration,
+        IHostEnvironment environment)
     {
         var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
         var roleManager = services.GetRequiredService<RoleManager<ApplicationRole>>();
+        var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(OpenIddictSeeder));
 
-        const string roleName = "User";
-        if (!await roleManager.RoleExistsAsync(roleName))
-        {
-            await roleManager.CreateAsync(new ApplicationRole(roleName));
-        }
+        await EnsureRolesAsync(roleManager);
 
         var email = configuration["OpenIddict:DemoUser:Email"] ?? "demo@devhome.local";
-        var password = configuration["OpenIddict:DemoUser:Password"] ?? "DevHome!2026";
+        var demoPassword = configuration["OpenIddict:DemoUser:Password"] ?? "DevHome!2026";
+
+        if (environment.IsDevelopment())
+        {
+            await EnsureDemoUserAsync(userManager, email, demoPassword, logger);
+        }
+
+        var adminEmail = configuration["Identity:Admin:Email"];
+        if (string.IsNullOrWhiteSpace(adminEmail) && environment.IsDevelopment())
+        {
+            adminEmail = email;
+        }
+
+        if (string.IsNullOrWhiteSpace(adminEmail))
+        {
+            logger.LogWarning(
+                "Администратор не назначен: задайте Identity:Admin:Email в настройках. " +
+                "Без него страницы /admin недоступны.");
+            return;
+        }
+
+        var administrator = await userManager.FindByEmailAsync(adminEmail);
+        if (administrator is null)
+        {
+            logger.LogInformation(
+                "Пользователь {Email} из Identity:Admin:Email ещё не зарегистрирован: роль администратора будет назначена при следующем запуске.",
+                adminEmail);
+            return;
+        }
+
+        if (await userManager.IsInRoleAsync(administrator, AdminRoles.Administrator))
+        {
+            return;
+        }
+
+        var roleResult = await userManager.AddToRoleAsync(administrator, AdminRoles.Administrator);
+        if (roleResult.Succeeded)
+        {
+            logger.LogInformation("Пользователь {Email} назначен администратором.", adminEmail);
+        }
+        else
+        {
+            logger.LogWarning(
+                "Не удалось назначить администратора {Email}: {Errors}",
+                adminEmail,
+                string.Join("; ", roleResult.Errors.Select(error => error.Description)));
+        }
+    }
+
+    private static async Task EnsureRolesAsync(RoleManager<ApplicationRole> roleManager)
+    {
+        foreach (var roleName in new[] { AdminRoles.User, AdminRoles.Administrator })
+        {
+            if (!await roleManager.RoleExistsAsync(roleName))
+            {
+                await roleManager.CreateAsync(new ApplicationRole(roleName));
+            }
+        }
+    }
+
+    private static async Task EnsureDemoUserAsync(
+        UserManager<ApplicationUser> userManager,
+        string email,
+        string password,
+        ILogger logger)
+    {
         var userName = email;
 
-        if (await userManager.FindByNameAsync(userName) is not null)
-        {
-            return;
-        }
-
         // Демо-пользователь мог быть создан раньше с коротким именем: приводим имя к адресу почты.
-        var existing = await userManager.FindByEmailAsync(email);
-        if (existing is not null)
+        var user = await userManager.FindByNameAsync(userName) ?? await userManager.FindByEmailAsync(email);
+
+        if (user is null)
         {
-            existing.UserName = userName;
-            await userManager.UpdateAsync(existing);
-            return;
+            user = new ApplicationUser
+            {
+                UserName = userName,
+                Email = email,
+                // Почта подтверждена сразу: демо-пользователь не проходит проверку письмом.
+                EmailConfirmed = true
+            };
+
+            var result = await userManager.CreateAsync(user, password);
+            if (!result.Succeeded)
+            {
+                logger.LogWarning(
+                    "Не удалось создать демо-пользователя {Email}: {Errors}",
+                    email,
+                    string.Join("; ", result.Errors.Select(error => error.Description)));
+                return;
+            }
+        }
+        else if (!string.Equals(user.UserName, userName, StringComparison.Ordinal))
+        {
+            user.UserName = userName;
+            await userManager.UpdateAsync(user);
         }
 
-        var user = new ApplicationUser
+        if (!await userManager.IsInRoleAsync(user, AdminRoles.User))
         {
-            UserName = userName,
-            Email = email,
-            // Почта подтверждена сразу: демо-пользователь не проходит проверку письмом.
-            EmailConfirmed = true
-        };
-
-        var result = await userManager.CreateAsync(user, password);
-        if (result.Succeeded)
-        {
-            await userManager.AddToRoleAsync(user, roleName);
+            await userManager.AddToRoleAsync(user, AdminRoles.User);
         }
     }
 }

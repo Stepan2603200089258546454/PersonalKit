@@ -1,0 +1,34 @@
+@inherits LayoutComponentBase
+@layout DevHome.Identity.Components.Layout.MainLayout
+
+@* Общий каркас страниц администрирования: заголовок, боковая навигация по
+   разделам админки и содержимое страницы. *@
+<div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+    <div>
+        <h1 class="h3 mb-1">Администрирование</h1>
+        <p class="text-body-secondary mb-0">
+            Пользователи, клиентские приложения, области и токены OpenIddict.
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-secondary btn-sm" href="/">
+            <i class="bi bi-house-door me-1" aria-hidden="true"></i>На главную
+        </a>
+        <a class="btn btn-outline-secondary btn-sm" href="/.well-known/openid-configuration" target="_blank" rel="noopener">
+            <i class="bi bi-file-code me-1" aria-hidden="true"></i>Метаданные OIDC
+        </a>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-3 col-xl-2">
+        <div class="card">
+            <div class="card-body p-2">
+                <AdminNavMenu />
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-9 col-xl-10">
+        @Body
+    </div>
+</div>

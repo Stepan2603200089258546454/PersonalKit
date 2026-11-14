@@ -1,0 +1,467 @@
+@page "/Account/Manage/Security"
+@attribute [MenuItem("Безопасность", Description = "Пароль, двухфакторная аутентификация и ключи доступа", Section = "Аккаунт", Icon = "bi bi-shield-lock", RequiresAuthorization = true, Order = 510)]
+
+@using System.Buffers.Text
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Http.Features
+@using Microsoft.AspNetCore.Identity
+@using DevHome.Identity.DataContext.Models
+
+@inject UserManager<ApplicationUser> UserManager
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<Security> Logger
+
+<PageTitle>Безопасность</PageTitle>
+
+<h2 class="h4 mb-3">Безопасность</h2>
+
+@if (message is not null)
+{
+    <div class="alert @(isError ? "alert-danger" : "alert-success")" role="alert">@message</div>
+}
+
+<div class="row g-4">
+    <div class="col-xl-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">Пароль</div>
+            <div class="card-body">
+                @if (hasPassword)
+                {
+                    <p class="small text-body-secondary">Пароль используется для входа по адресу электронной почты.</p>
+                }
+                else
+                {
+                    <p class="small text-body-secondary">
+                        Локального пароля нет: вы входите только внешним способом. Задайте пароль,
+                        чтобы входить без внешнего сервиса.
+                    </p>
+                }
+
+                <EditForm Model="PasswordInput" FormName="password" OnValidSubmit="OnPasswordSubmitAsync" method="post">
+                    <DataAnnotationsValidator />
+                    <div role="alert" aria-atomic="true">
+                        <ValidationSummary class="text-danger" />
+                    </div>
+
+                    @if (hasPassword)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label" for="old-password">Текущий пароль</label>
+                            <InputText id="old-password" type="password" class="form-control" @bind-Value="PasswordInput.OldPassword" autocomplete="current-password" />
+                        </div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label" for="new-password">Новый пароль</label>
+                        <InputText id="new-password" type="password" class="form-control" @bind-Value="PasswordInput.NewPassword" autocomplete="new-password" />
+                        <ValidationMessage For="() => PasswordInput.NewPassword" class="text-danger small" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="new-password-confirm">Повтор нового пароля</label>
+                        <InputText id="new-password-confirm" type="password" class="form-control" @bind-Value="PasswordInput.ConfirmPassword" autocomplete="new-password" />
+                        <ValidationMessage For="() => PasswordInput.ConfirmPassword" class="text-danger small" />
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" disabled="@isBusy">
+                        @(hasPassword ? "Изменить пароль" : "Задать пароль")
+                    </button>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-6">
+        <div class="card h-100">
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <span class="fw-semibold">Двухфакторная аутентификация</span>
+                <span class="badge @(twoFactorEnabled ? "text-bg-success" : "text-bg-secondary")">
+                    @(twoFactorEnabled ? "включена" : "выключена")
+                </span>
+            </div>
+            <div class="card-body">
+                @if (!canTrack)
+                {
+                    <div class="alert alert-danger small" role="alert">
+                        Политика конфиденциальности и файлов cookie не принята, поэтому включить
+                        2FA нельзя.
+                    </div>
+                }
+                else
+                {
+                    @if (twoFactorEnabled && recoveryCodesLeft <= 3)
+                    {
+                        <div class="alert @(recoveryCodesLeft == 0 ? "alert-danger" : "alert-warning") small" role="alert">
+                            @if (recoveryCodesLeft == 0)
+                            {
+                                <span>Кодов восстановления не осталось. Создайте новый набор, иначе при потере устройства доступ будет потерян.</span>
+                            }
+                            else
+                            {
+                                <span>Осталось кодов восстановления: @recoveryCodesLeft. Рекомендуем создать новый набор.</span>
+                            }
+                        </div>
+                    }
+
+                    <dl class="row small mb-3">
+                        <dt class="col-6 fw-normal text-body-secondary">Приложение-аутентификатор</dt>
+                        <dd class="col-6">@(hasAuthenticator ? "настроено" : "не настроено")</dd>
+                        <dt class="col-6 fw-normal text-body-secondary">Коды восстановления</dt>
+                        <dd class="col-6 mb-0">@recoveryCodesLeft</dd>
+                    </dl>
+
+                    <div class="d-grid gap-2">
+                        <a class="btn btn-outline-primary btn-sm" href="Account/Manage/EnableAuthenticator">
+                            <i class="bi bi-qr-code me-1" aria-hidden="true"></i>
+                            @(hasAuthenticator ? "Настроить приложение-аутентификатор" : "Добавить приложение-аутентификатор")
+                        </a>
+
+                        @if (twoFactorEnabled)
+                        {
+                            <a class="btn btn-outline-secondary btn-sm" href="Account/Manage/GenerateRecoveryCodes">
+                                <i class="bi bi-life-preserver me-1" aria-hidden="true"></i>Создать коды восстановления
+                            </a>
+                            <a class="btn btn-outline-danger btn-sm" href="Account/Manage/Disable2fa">
+                                <i class="bi bi-shield-slash me-1" aria-hidden="true"></i>Отключить 2FA
+                            </a>
+                        }
+
+                        @if (hasAuthenticator)
+                        {
+                            <a class="btn btn-outline-secondary btn-sm" href="Account/Manage/ResetAuthenticator">
+                                <i class="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Сбросить ключ аутентификатора
+                            </a>
+                        }
+                    </div>
+
+                    @if (isMachineRemembered)
+                    {
+                        <form @formname="forget-browser" @onsubmit="OnForgetBrowserAsync" method="post" class="mt-2">
+                            <button type="submit" class="btn btn-outline-secondary btn-sm w-100">
+                                Забыть этот браузер
+                            </button>
+                        </form>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold">Ключи доступа</div>
+            <div class="card-body">
+                <p class="small text-body-secondary">
+                    Ключ доступа — вход по отпечатку, PIN или лицу без пароля. Ключи хранятся
+                    на устройстве и не передаются серверу.
+                </p>
+
+                @if (passkeys.Count == 0)
+                {
+                    <p class="text-body-secondary mb-3">Ключи доступа не зарегистрированы.</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush mb-3">
+                        @foreach (var passkey in passkeys)
+                        {
+                            var credentialId = Base64Url.EncodeToString(passkey.CredentialId);
+
+                            <li class="list-group-item d-flex flex-wrap align-items-center justify-content-between gap-2 px-0">
+                                <div class="min-w-0">
+                                    <div class="fw-semibold text-truncate">@PasskeyAuthenticators.GetDisplayName(passkey)</div>
+                                    <div class="small text-body-secondary">
+                                        создан @passkey.CreatedAt.UtcDateTime.ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <a class="btn btn-sm btn-outline-secondary" href="Account/Manage/RenamePasskey/@credentialId">
+                                        <i class="bi bi-pencil me-1" aria-hidden="true"></i>Переименовать
+                                    </a>
+                                    <form @formname="@($"delete-passkey-{credentialId}")" @onsubmit="OnDeletePasskeyAsync" method="post">
+                                        <input type="hidden" name="CredentialId" value="@credentialId" />
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" disabled="@isBusy">
+                                            <i class="bi bi-trash me-1" aria-hidden="true"></i>Удалить
+                                        </button>
+                                    </form>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+
+                <form @formname="add-passkey" @onsubmit="OnAddPasskeyAsync" method="post">
+                    @if (passkeys.Count >= MaxPasskeyCount)
+                    {
+                        <p class="text-danger small mb-0">
+                            Достигнуто максимальное число ключей доступа. Удалите один из них перед добавлением нового.
+                        </p>
+                    }
+                    else
+                    {
+                        <PasskeySubmit Operation="PasskeyOperation.Create" Name="Input" class="btn btn-primary">
+                            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Добавить ключ доступа
+                        </PasskeySubmit>
+                    }
+                </form>
+            </div>
+        </div>
+    </div>
+
+    @if (currentLogins.Count > 0 || hasExternalProviders)
+    {
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header fw-semibold">Внешние способы входа</div>
+                <div class="card-body">
+                    @if (currentLogins.Count == 0)
+                    {
+                        <p class="small text-body-secondary mb-2">Внешние входы не привязаны.</p>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush mb-2">
+                            @foreach (var login in currentLogins)
+                            {
+                                <li class="list-group-item px-0">@login.ProviderDisplayName</li>
+                            }
+                        </ul>
+                    }
+
+                    <a class="btn btn-outline-secondary btn-sm" href="Account/Manage/ExternalLogins">
+                        Управлять внешними входами
+                    </a>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const int MaxPasskeyCount = 100;
+
+    private string? message;
+    private bool isError;
+    private bool isBusy;
+    private ApplicationUser? user;
+
+    private bool hasPassword;
+    private bool twoFactorEnabled;
+    private bool hasAuthenticator;
+    private bool isMachineRemembered;
+    private bool canTrack;
+    private int recoveryCodesLeft;
+    private List<UserPasskeyInfo> passkeys = [];
+    private IList<UserLoginInfo> currentLogins = [];
+    private bool hasExternalProviders;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromTempData(Name = IdentityRedirectManager.StatusMessageKey)]
+    private string? IdentityStatusMessage { get; set; }
+
+    [SupplyParameterFromForm(FormName = "password")]
+    private PasswordModel PasswordInput { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "add-passkey")]
+    private PasskeyInputModel Input { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private string? CredentialId { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        message = IdentityStatusMessage;
+        IdentityStatusMessage = null;
+        PasswordInput ??= new();
+        Input ??= new();
+
+        user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
+        }
+
+        hasPassword = await UserManager.HasPasswordAsync(user);
+        twoFactorEnabled = await UserManager.GetTwoFactorEnabledAsync(user);
+        hasAuthenticator = await UserManager.GetAuthenticatorKeyAsync(user) is not null;
+        recoveryCodesLeft = await UserManager.CountRecoveryCodesAsync(user);
+        isMachineRemembered = await SignInManager.IsTwoFactorClientRememberedAsync(user);
+        canTrack = HttpContext.Features.Get<ITrackingConsentFeature>()?.CanTrack ?? true;
+        passkeys = (await UserManager.GetPasskeysAsync(user)).ToList();
+        currentLogins = await UserManager.GetLoginsAsync(user);
+        hasExternalProviders = (await SignInManager.GetExternalAuthenticationSchemesAsync()).Any();
+    }
+
+    private async Task OnPasswordSubmitAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
+        }
+
+        if (hasPassword && string.IsNullOrEmpty(PasswordInput.OldPassword))
+        {
+            SetError("Введите текущий пароль.");
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            IdentityResult result;
+            string successMessage;
+
+            if (hasPassword)
+            {
+                result = await UserManager.ChangePasswordAsync(user, PasswordInput.OldPassword!, PasswordInput.NewPassword);
+                successMessage = "Пароль изменён.";
+            }
+            else
+            {
+                result = await UserManager.AddPasswordAsync(user, PasswordInput.NewPassword);
+                successMessage = "Пароль задан.";
+            }
+
+            if (!result.Succeeded)
+            {
+                SetError("Не удалось сохранить пароль: " + Describe(result));
+                return;
+            }
+
+            await SignInManager.RefreshSignInAsync(user);
+            Logger.LogInformation("Пользователь {UserId} обновил пароль.", await UserManager.GetUserIdAsync(user));
+
+            IdentityStatusMessage = successMessage;
+            RedirectManager.RedirectToCurrentPage();
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task OnForgetBrowserAsync()
+    {
+        await SignInManager.ForgetTwoFactorClientAsync();
+        IdentityStatusMessage = "Текущий браузер забыт. При следующем входе потребуется код 2FA.";
+        RedirectManager.RedirectToCurrentPage();
+    }
+
+    private async Task OnAddPasskeyAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(Input.Error))
+        {
+            SetError($"Не удалось добавить ключ доступа: {Input.Error}");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(Input.CredentialJson))
+        {
+            SetError("Браузер не предоставил ключ доступа.");
+            return;
+        }
+
+        if (passkeys.Count >= MaxPasskeyCount)
+        {
+            SetError("Достигнуто максимальное число ключей доступа.");
+            return;
+        }
+
+        var attestationResult = await SignInManager.PerformPasskeyAttestationAsync(Input.CredentialJson);
+        if (!attestationResult.Succeeded)
+        {
+            SetError($"Не удалось добавить ключ доступа: {attestationResult.Failure.Message}");
+            return;
+        }
+
+        if (PasskeyAuthenticators.TryGetDefaultDisplayName(attestationResult.Passkey, out var defaultName))
+        {
+            attestationResult.Passkey.Name = defaultName;
+        }
+
+        var result = await UserManager.AddOrUpdatePasskeyAsync(user, attestationResult.Passkey);
+        if (!result.Succeeded)
+        {
+            SetError("Не удалось добавить ключ доступа к учётной записи.");
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(attestationResult.Passkey.Name))
+        {
+            IdentityStatusMessage = "Ключ доступа добавлен.";
+            RedirectManager.RedirectToCurrentPage();
+            return;
+        }
+
+        var credentialId = Base64Url.EncodeToString(attestationResult.Passkey.CredentialId);
+        RedirectManager.RedirectTo($"Account/Manage/RenamePasskey/{credentialId}");
+    }
+
+    private async Task OnDeletePasskeyAsync()
+    {
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
+        }
+
+        byte[] credentialId;
+        try
+        {
+            credentialId = Base64Url.DecodeFromChars(CredentialId);
+        }
+        catch (FormatException)
+        {
+            SetError("Идентификатор ключа доступа имеет неверный формат.");
+            return;
+        }
+
+        var result = await UserManager.RemovePasskeyAsync(user, credentialId);
+        if (!result.Succeeded)
+        {
+            SetError("Не удалось удалить ключ доступа.");
+            return;
+        }
+
+        IdentityStatusMessage = "Ключ доступа удалён.";
+        RedirectManager.RedirectToCurrentPage();
+    }
+
+    private void SetError(string text)
+    {
+        message = text;
+        isError = true;
+    }
+
+    private static string Describe(IdentityResult result) =>
+        string.Join(" ", result.Errors.Select(error => error.Description));
+
+    private sealed class PasswordModel
+    {
+        [DataType(DataType.Password)]
+        [Display(Name = "Текущий пароль")]
+        public string? OldPassword { get; set; }
+
+        [Required(ErrorMessage = "Введите новый пароль.")]
+        [StringLength(100, MinimumLength = 6, ErrorMessage = "Длина пароля должна быть от 6 до 100 символов.")]
+        [DataType(DataType.Password)]
+        [Display(Name = "Новый пароль")]
+        public string NewPassword { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        [Compare(nameof(NewPassword), ErrorMessage = "Пароли не совпадают.")]
+        [Display(Name = "Повтор нового пароля")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

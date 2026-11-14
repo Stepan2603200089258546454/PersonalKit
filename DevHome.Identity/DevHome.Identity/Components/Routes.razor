@@ -1,8 +1,23 @@
-﻿<Router AppAssembly="typeof(Program).Assembly" AdditionalAssemblies="new[] { typeof(Client._Imports).Assembly }" NotFoundPage="typeof(Pages.NotFound)">
+@* Маршрутизация приложения. Для страниц администрирования нужна роль Admin:
+   вошедшему без роли показываем пояснение, анонимного отправляем на вход. *@
+<Router AppAssembly="typeof(Program).Assembly" AdditionalAssemblies="new[] { typeof(Client._Imports).Assembly }" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
         <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
-            <NotAuthorized>
-                <RedirectToLogin />
+            <NotAuthorized Context="state">
+                @if (state.User.Identity?.IsAuthenticated == true)
+                {
+                    <LayoutView Layout="typeof(Layout.MainLayout)">
+                        <div class="alert alert-warning" role="alert">
+                            <h1 class="h4 mb-2">Недостаточно прав</h1>
+                            <p class="mb-2">Эта страница доступна только администратору.</p>
+                            <a class="btn btn-outline-secondary btn-sm" href="/">Вернуться на главную</a>
+                        </div>
+                    </LayoutView>
+                }
+                else
+                {
+                    <RedirectToLogin />
+                }
             </NotAuthorized>
         </AuthorizeRouteView>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />

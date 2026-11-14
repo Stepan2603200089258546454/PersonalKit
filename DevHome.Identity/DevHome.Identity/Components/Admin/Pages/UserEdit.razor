@@ -1,0 +1,886 @@
+﻿@page "/admin/users/new"
+@page "/admin/users/{Id}"
+@attribute [Authorize(Roles = AdminRoles.Administrator)]
+@attribute [MenuItem("Пользователь", Section = AdminNavigation.Section, Roles = AdminRoles.Administrator, Hidden = true)]
+@rendermode InteractiveServer
+@layout DevHome.Identity.Components.Admin.Shared.AdminLayout
+
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using DevHome.Identity.Components.Account
+
+@inject UserManager<ApplicationUser> UserManager
+@inject RoleManager<ApplicationRole> RoleManager
+@inject IDbContextFactory<DBContext> DbFactory
+@inject IOpenIddictTokenManager TokenManager
+@inject IOpenIddictAuthorizationManager AuthorizationManager
+@inject NavigationManager Navigation
+@inject ILogger<UserEdit> Logger
+
+<PageTitle>@(isNew ? "Новый пользователь" : profile.Email ?? "Пользователь")</PageTitle>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+        <h2 class="h4 mb-1">@(isNew ? "Новый пользователь" : "Пользователь")</h2>
+        @if (!isNew)
+        {
+            <p class="text-body-secondary mb-0 small">
+                <code>@user?.Id</code>
+                @if (!string.IsNullOrWhiteSpace(profile.Email))
+                {
+                    <span class="ms-1">&middot; @profile.Email</span>
+                }
+            </p>
+        }
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="@AdminNavigation.Users">
+        <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>К списку
+    </a>
+</div>
+
+@if (notFound)
+{
+    <div class="alert alert-warning" role="alert">Пользователь не найден. Возможно, его удалили.</div>
+}
+else
+{
+    @if (message is not null)
+    {
+        <div class="alert @(isError ? "alert-danger" : "alert-success") alert-dismissible" role="alert">
+            @message
+        </div>
+    }
+
+    @if (isNew)
+    {
+        <div class="card">
+            <div class="card-header fw-semibold">Учётная запись</div>
+            <div class="card-body">
+                <EditForm Model="create" OnValidSubmit="CreateAsync" FormName="create-user">
+                    <DataAnnotationsValidator />
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="create-email">Электронная почта</label>
+                            <InputText id="create-email" class="form-control" @bind-Value="create.Email" autocomplete="off" />
+                            <ValidationMessage For="() => create.Email" class="text-danger small" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="create-username">Имя пользователя</label>
+                            <InputText id="create-username" class="form-control" @bind-Value="create.UserName" autocomplete="off" />
+                            <div class="form-text">Пусто — будет совпадать с адресом почты.</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="create-password">Пароль</label>
+                            <InputText id="create-password" type="password" class="form-control" @bind-Value="create.Password" autocomplete="new-password" />
+                            <ValidationMessage For="() => create.Password" class="text-danger small" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="create-password-confirm">Повтор пароля</label>
+                            <InputText id="create-password-confirm" type="password" class="form-control" @bind-Value="create.ConfirmPassword" autocomplete="new-password" />
+                            <ValidationMessage For="() => create.ConfirmPassword" class="text-danger small" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="create-phone">Телефон</label>
+                            <InputText id="create-phone" class="form-control" @bind-Value="create.PhoneNumber" autocomplete="off" />
+                            <ValidationMessage For="() => create.PhoneNumber" class="text-danger small" />
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="form-check mb-2">
+                                <InputCheckbox id="create-email-confirmed" class="form-check-input" @bind-Value="create.EmailConfirmed" />
+                                <label class="form-check-label" for="create-email-confirmed">Почта уже подтверждена</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4" />
+
+                    <div class="fw-semibold mb-2">Роли</div>
+                    <div class="row g-2">
+                        @foreach (var role in roleOptions)
+                        {
+                            <div class="col-sm-6 col-lg-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="create-role-@role.Name" @bind="role.Selected" />
+                                    <label class="form-check-label" for="create-role-@role.Name">@role.Name</label>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="submit" class="btn btn-primary" disabled="@isBusy">
+                            <i class="bi bi-person-plus me-1" aria-hidden="true"></i>Создать
+                        </button>
+                        <a class="btn btn-outline-secondary" href="@AdminNavigation.Users">Отмена</a>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    }
+    else if (user is not null)
+    {
+        <div class="row g-4">
+            <div class="col-xl-7">
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Основные сведения</div>
+                    <div class="card-body">
+                        <EditForm Model="profile" OnValidSubmit="SaveProfileAsync" FormName="profile">
+                            <DataAnnotationsValidator />
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label" for="edit-email">Электронная почта</label>
+                                    <InputText id="edit-email" class="form-control" @bind-Value="profile.Email" autocomplete="off" />
+                                    <ValidationMessage For="() => profile.Email" class="text-danger small" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label" for="edit-username">Имя пользователя</label>
+                                    <InputText id="edit-username" class="form-control" @bind-Value="profile.UserName" autocomplete="off" />
+                                    <ValidationMessage For="() => profile.UserName" class="text-danger small" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label" for="edit-phone">Телефон</label>
+                                    <InputText id="edit-phone" class="form-control" @bind-Value="profile.PhoneNumber" autocomplete="off" />
+                                    <ValidationMessage For="() => profile.PhoneNumber" class="text-danger small" />
+                                </div>
+                                <div class="col-md-6 d-flex align-items-end">
+                                    <div class="form-check mb-2">
+                                        <InputCheckbox id="edit-email-confirmed" class="form-check-input" @bind-Value="profile.EmailConfirmed" />
+                                        <label class="form-check-label" for="edit-email-confirmed">Почта подтверждена</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary mt-3" disabled="@isBusy">Сохранить</button>
+                        </EditForm>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Роли</div>
+                    <div class="card-body">
+                        <div class="row g-2">
+                            @foreach (var role in roleOptions)
+                            {
+                                <div class="col-sm-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="edit-role-@role.Name" @bind="role.Selected" />
+                                        <label class="form-check-label" for="edit-role-@role.Name">
+                                            @role.Name
+                                            @if (role.Selected && role.Name == AdminRoles.Administrator && isLastAdmin)
+                                            {
+                                                <span class="badge text-bg-warning ms-1">единственный администратор</span>
+                                            }
+                                        </label>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                        <button type="button" class="btn btn-primary mt-3" disabled="@isBusy" @onclick="SaveRolesAsync">
+                            Сохранить роли
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header fw-semibold">Ключи доступа</div>
+                    @if (passkeys.Count == 0)
+                    {
+                        <div class="card-body text-body-secondary">Ключи доступа не зарегистрированы.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush">
+                            @foreach (var passkey in passkeys)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                                    <div class="min-w-0">
+                                        <div class="text-truncate">@PasskeyAuthenticators.GetDisplayName(passkey)</div>
+                                        <div class="small text-body-secondary">
+                                            создан @passkey.CreatedAt.UtcDateTime.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("ru-RU"))
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@isBusy" @onclick="() => RemovePasskeyAsync(passkey)">
+                                        <i class="bi bi-trash" aria-hidden="true"></i>Удалить
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+
+            <div class="col-xl-5">
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Доступ</div>
+                    <div class="card-body">
+                        <dl class="row small mb-3">
+                            <dt class="col-6 fw-normal text-body-secondary">Почта</dt>
+                            <dd class="col-6 mb-2">
+                                @if (profile.EmailConfirmed)
+                                {
+                                    <span class="badge text-bg-success">подтверждена</span>
+                                }
+                                else
+                                {
+                                    <span class="badge text-bg-warning">не подтверждена</span>
+                                }
+                            </dd>
+                            <dt class="col-6 fw-normal text-body-secondary">Пароль</dt>
+                            <dd class="col-6 mb-2">@(hasPassword ? "задан" : "не задан")</dd>
+                            <dt class="col-6 fw-normal text-body-secondary">Двухфакторная</dt>
+                            <dd class="col-6 mb-2">@(twoFactorEnabled ? "включена" : "выключена")</dd>
+                            <dt class="col-6 fw-normal text-body-secondary">Приложение-аутентификатор</dt>
+                            <dd class="col-6 mb-2">@(hasAuthenticator ? "настроено" : "не настроено")</dd>
+                            <dt class="col-6 fw-normal text-body-secondary">Коды восстановления</dt>
+                            <dd class="col-6 mb-2">@recoveryCodesLeft</dd>
+                            <dt class="col-6 fw-normal text-body-secondary">Блокировка</dt>
+                            <dd class="col-6 mb-2">
+                                @if (isLocked)
+                                {
+                                    <span class="badge text-bg-danger">до @user.LockoutEnd?.ToLocalTime().ToString("g")</span>
+                                }
+                                else
+                                {
+                                    <span class="badge text-bg-success">нет</span>
+                                }
+                            </dd>
+                            <dt class="col-6 fw-normal text-body-secondary">Авторизации</dt>
+                            <dd class="col-6 mb-2">@authorizationCount</dd>
+                            <dt class="col-6 fw-normal text-body-secondary">Действующие токены</dt>
+                            <dd class="col-6 mb-0">@tokenCount</dd>
+                        </dl>
+
+                        <div class="d-grid gap-2">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="ConfirmEmailAsync">
+                                <i class="bi bi-envelope-check me-1" aria-hidden="true"></i>Подтвердить почту
+                            </button>
+                            <button type="button" class="btn @(isLocked ? "btn-outline-success" : "btn-outline-warning") btn-sm" disabled="@isBusy" @onclick="ToggleLockoutAsync">
+                                <i class="bi @(isLocked ? "bi-unlock" : "bi-lock") me-1" aria-hidden="true"></i>
+                                @(isLocked ? "Разблокировать" : "Заблокировать")
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@isBusy" @onclick="ResetTwoFactorAsync">
+                                <i class="bi bi-shield-slash me-1" aria-hidden="true"></i>Сбросить двухфакторную аутентификацию
+                            </button>
+                            <button type="button" class="btn btn-outline-danger btn-sm" disabled="@isBusy" @onclick="EndSessionsAsync">
+                                <i class="bi bi-box-arrow-right me-1" aria-hidden="true"></i>Завершить все сеансы и отозвать токены
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Задать новый пароль</div>
+                    <div class="card-body">
+                        <EditForm Model="password" OnValidSubmit="SetPasswordAsync" FormName="set-password">
+                            <DataAnnotationsValidator />
+                            <div class="mb-3">
+                                <label class="form-label" for="new-password">Новый пароль</label>
+                                <InputText id="new-password" type="password" class="form-control" @bind-Value="password.NewPassword" autocomplete="new-password" />
+                                <ValidationMessage For="() => password.NewPassword" class="text-danger small" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label" for="new-password-confirm">Повтор пароля</label>
+                                <InputText id="new-password-confirm" type="password" class="form-control" @bind-Value="password.ConfirmPassword" autocomplete="new-password" />
+                                <ValidationMessage For="() => password.ConfirmPassword" class="text-danger small" />
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm" disabled="@isBusy">
+                                <i class="bi bi-key me-1" aria-hidden="true"></i>Задать пароль
+                            </button>
+                        </EditForm>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Внешние входы</div>
+                    @if (externalLogins.Count == 0)
+                    {
+                        <div class="card-body text-body-secondary small">Внешние способы входа не привязаны.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush small">
+                            @foreach (var login in externalLogins)
+                            {
+                                <li class="list-group-item d-flex justify-content-between gap-2">
+                                    <span>@login.ProviderDisplayName</span>
+                                    <code class="text-truncate" style="max-width: 12rem;">@login.ProviderKey</code>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+
+                <div class="card border-danger">
+                    <div class="card-header fw-semibold text-danger">Удаление учётной записи</div>
+                    <div class="card-body">
+                        @if (isSelf)
+                        {
+                            <p class="small text-body-secondary mb-0">Нельзя удалить собственную учётную запись.</p>
+                        }
+                        else if (isLastAdmin)
+                        {
+                            <p class="small text-body-secondary mb-0">Нельзя удалить единственного администратора.</p>
+                        }
+                        else if (!confirmDelete)
+                        {
+                            <p class="small text-body-secondary">Учётная запись будет удалена вместе с привязками и ключами доступа. Действие необратимо.</p>
+                            <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => confirmDelete = true">
+                                <i class="bi bi-trash me-1" aria-hidden="true"></i>Удалить пользователя
+                            </button>
+                        }
+                        else
+                        {
+                            <p class="small text-danger">Подтвердите удаление: @profile.Email</p>
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-danger btn-sm" disabled="@isBusy" @onclick="DeleteAsync">
+                                    Да, удалить
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => confirmDelete = false">
+                                    Отмена
+                                </button>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public string? Id { get; set; }
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    private ApplicationUser? user;
+    private bool isNew;
+    private bool notFound;
+    private bool isBusy;
+    private bool isSelf;
+    private bool isLastAdmin;
+    private bool isLocked;
+    private bool hasPassword;
+    private bool twoFactorEnabled;
+    private bool hasAuthenticator;
+    private bool confirmDelete;
+    private int recoveryCodesLeft;
+    private int authorizationCount;
+    private int tokenCount;
+    private string? message;
+    private bool isError;
+
+    private ProfileModel profile = new();
+    private PasswordModel password = new();
+    private CreateUserModel create = new();
+    private List<RoleOption> roleOptions = [];
+    private List<UserPasskeyInfo> passkeys = [];
+    private List<UserLoginInfo> externalLogins = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isNew = string.IsNullOrWhiteSpace(Id);
+        notFound = false;
+        message = null;
+        isError = false;
+        confirmDelete = false;
+        password = new PasswordModel();
+        create = new CreateUserModel();
+
+        await LoadRolesAsync();
+
+        if (isNew)
+        {
+            return;
+        }
+
+        user = await UserManager.FindByIdAsync(Id!);
+        if (user is null)
+        {
+            notFound = true;
+            return;
+        }
+
+        profile = new ProfileModel
+        {
+            Email = user.Email,
+            UserName = user.UserName,
+            PhoneNumber = user.PhoneNumber,
+            EmailConfirmed = user.EmailConfirmed
+        };
+
+        var roles = await UserManager.GetRolesAsync(user);
+        foreach (var role in roleOptions)
+        {
+            role.Selected = roles.Contains(role.Name, StringComparer.Ordinal);
+        }
+
+        isSelf = await IsCurrentUserAsync(user.Id);
+        isLastAdmin = await IsLastAdministratorAsync(user);
+        isLocked = user.LockoutEnd > DateTimeOffset.UtcNow;
+        hasPassword = await UserManager.HasPasswordAsync(user);
+        twoFactorEnabled = await UserManager.GetTwoFactorEnabledAsync(user);
+        hasAuthenticator = await UserManager.GetAuthenticatorKeyAsync(user) is not null;
+        recoveryCodesLeft = await UserManager.CountRecoveryCodesAsync(user);
+        passkeys = (await UserManager.GetPasskeysAsync(user)).ToList();
+        externalLogins = (await UserManager.GetLoginsAsync(user)).ToList();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        authorizationCount = await db.Set<OpenIddictEntityFrameworkCoreAuthorization>()
+            .CountAsync(authorization => authorization.Subject == user.Id);
+        tokenCount = await db.Set<OpenIddictEntityFrameworkCoreToken>()
+            .CountAsync(token => token.Subject == user.Id && token.Status == Statuses.Valid);
+    }
+
+    private async Task LoadRolesAsync()
+    {
+        var names = await RoleManager.Roles
+            .AsNoTracking()
+            .OrderBy(role => role.Name)
+            .Select(role => role.Name!)
+            .ToListAsync();
+
+        roleOptions = names.Select(name => new RoleOption(name)).ToList();
+    }
+
+    private async Task CreateAsync()
+    {
+        isBusy = true;
+        message = null;
+
+        try
+        {
+            var user = new ApplicationUser
+            {
+                UserName = string.IsNullOrWhiteSpace(create.UserName) ? create.Email : create.UserName.Trim(),
+                Email = create.Email!.Trim(),
+                PhoneNumber = string.IsNullOrWhiteSpace(create.PhoneNumber) ? null : create.PhoneNumber.Trim(),
+                EmailConfirmed = create.EmailConfirmed
+            };
+
+            var result = await UserManager.CreateAsync(user, create.Password);
+            if (!result.Succeeded)
+            {
+                SetError("Не удалось создать пользователя: " + Describe(result));
+                return;
+            }
+
+            var roles = roleOptions.Where(role => role.Selected).Select(role => role.Name).ToArray();
+            if (roles.Length > 0)
+            {
+                var roleResult = await UserManager.AddToRolesAsync(user, roles);
+                if (!roleResult.Succeeded)
+                {
+                    SetError("Пользователь создан, но роли не назначены: " + Describe(roleResult));
+                    return;
+                }
+            }
+
+            Logger.LogInformation("Администратор создал пользователя {Email}.", user.Email);
+            Navigation.NavigateTo(AdminNavigation.User(user.Id));
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task SaveProfileAsync()
+    {
+        if (user is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        message = null;
+
+        try
+        {
+            user.Email = profile.Email?.Trim();
+            user.UserName = string.IsNullOrWhiteSpace(profile.UserName) ? profile.Email?.Trim() : profile.UserName.Trim();
+            user.PhoneNumber = string.IsNullOrWhiteSpace(profile.PhoneNumber) ? null : profile.PhoneNumber.Trim();
+            user.EmailConfirmed = profile.EmailConfirmed;
+
+            var result = await UserManager.UpdateAsync(user);
+            if (!result.Succeeded)
+            {
+                SetError("Не удалось сохранить сведения: " + Describe(result));
+                return;
+            }
+
+            await RefreshSelfIfNeededAsync();
+            SetSuccess("Сведения сохранены.");
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task SaveRolesAsync()
+    {
+        if (user is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        message = null;
+
+        try
+        {
+            var desired = roleOptions.Where(role => role.Selected).Select(role => role.Name).ToArray();
+            var current = await UserManager.GetRolesAsync(user);
+
+            var removingAdmin = current.Contains(AdminRoles.Administrator, StringComparer.Ordinal) &&
+                                !desired.Contains(AdminRoles.Administrator, StringComparer.Ordinal);
+            if (removingAdmin && await IsLastAdministratorAsync(user))
+            {
+                SetError("Нельзя снять роль администратора с единственного администратора.");
+                return;
+            }
+
+            var toAdd = desired.Except(current, StringComparer.Ordinal).ToArray();
+            var toRemove = current.Except(desired, StringComparer.Ordinal).ToArray();
+
+            if (toAdd.Length > 0)
+            {
+                var addResult = await UserManager.AddToRolesAsync(user, toAdd);
+                if (!addResult.Succeeded)
+                {
+                    SetError("Не удалось назначить роли: " + Describe(addResult));
+                    return;
+                }
+            }
+
+            if (toRemove.Length > 0)
+            {
+                var removeResult = await UserManager.RemoveFromRolesAsync(user, toRemove);
+                if (!removeResult.Succeeded)
+                {
+                    SetError("Не удалось снять роли: " + Describe(removeResult));
+                    return;
+                }
+            }
+
+            await RefreshSelfIfNeededAsync();
+            SetSuccess("Роли сохранены.");
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task SetPasswordAsync()
+    {
+        if (user is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        message = null;
+
+        try
+        {
+            var token = await UserManager.GeneratePasswordResetTokenAsync(user);
+            var result = await UserManager.ResetPasswordAsync(user, token, password.NewPassword);
+            if (!result.Succeeded)
+            {
+                SetError("Не удалось задать пароль: " + Describe(result));
+                return;
+            }
+
+            password = new PasswordModel();
+            hasPassword = true;
+            Logger.LogInformation("Администратор изменил пароль пользователя {Email}.", user.Email);
+            SetSuccess("Пароль изменён. Все сеансы пользователя завершены.");
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task ConfirmEmailAsync()
+    {
+        if (user is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(user.Email))
+        {
+            SetError("Сначала задайте адрес электронной почты.");
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            user.EmailConfirmed = true;
+            var result = await UserManager.UpdateAsync(user);
+            if (!result.Succeeded)
+            {
+                SetError("Не удалось подтвердить почту: " + Describe(result));
+                return;
+            }
+
+            profile.EmailConfirmed = true;
+            SetSuccess("Адрес электронной почты подтверждён.");
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task ToggleLockoutAsync()
+    {
+        if (user is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await UserManager.SetLockoutEnabledAsync(user, true);
+
+            if (isLocked)
+            {
+                await UserManager.SetLockoutEndDateAsync(user, null);
+                await UserManager.ResetAccessFailedCountAsync(user);
+                isLocked = false;
+                SetSuccess("Учётная запись разблокирована.");
+            }
+            else
+            {
+                await UserManager.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+                isLocked = true;
+                SetSuccess("Учётная запись заблокирована.");
+            }
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task ResetTwoFactorAsync()
+    {
+        if (user is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await UserManager.SetTwoFactorEnabledAsync(user, false);
+            await UserManager.ResetAuthenticatorKeyAsync(user);
+            twoFactorEnabled = false;
+            hasAuthenticator = false;
+            recoveryCodesLeft = 0;
+            SetSuccess("Двухфакторная аутентификация сброшена: пользователь настроит её заново.");
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task EndSessionsAsync()
+    {
+        if (user is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await UserManager.UpdateSecurityStampAsync(user);
+            await TokenManager.RevokeBySubjectAsync(user.Id);
+            await AuthorizationManager.RevokeBySubjectAsync(user.Id);
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            authorizationCount = await db.Set<OpenIddictEntityFrameworkCoreAuthorization>()
+                .CountAsync(authorization => authorization.Subject == user.Id && authorization.Status == Statuses.Valid);
+            tokenCount = 0;
+
+            SetSuccess("Все сеансы завершены, токены и авторизации отозваны.");
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task RemovePasskeyAsync(UserPasskeyInfo passkey)
+    {
+        if (user is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var result = await UserManager.RemovePasskeyAsync(user, passkey.CredentialId);
+            if (!result.Succeeded)
+            {
+                SetError("Не удалось удалить ключ доступа: " + Describe(result));
+                return;
+            }
+
+            passkeys = (await UserManager.GetPasskeysAsync(user)).ToList();
+            SetSuccess("Ключ доступа удалён.");
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (user is null || isSelf)
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await TokenManager.RevokeBySubjectAsync(user.Id);
+            await AuthorizationManager.RevokeBySubjectAsync(user.Id);
+
+            var result = await UserManager.DeleteAsync(user);
+            if (!result.Succeeded)
+            {
+                SetError("Не удалось удалить пользователя: " + Describe(result));
+                return;
+            }
+
+            Logger.LogInformation("Администратор удалил пользователя {Email}.", profile.Email);
+            Navigation.NavigateTo(AdminNavigation.Users);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task RefreshSelfIfNeededAsync()
+    {
+        if (isSelf)
+        {
+            Navigation.Refresh();
+        }
+    }
+
+    private async Task<bool> IsCurrentUserAsync(string userId)
+    {
+        if (AuthenticationStateTask is null)
+        {
+            return false;
+        }
+
+        var state = await AuthenticationStateTask;
+        return string.Equals(state.User.FindFirstValue(ClaimTypes.NameIdentifier), userId, StringComparison.Ordinal);
+    }
+
+    private async Task<bool> IsLastAdministratorAsync(ApplicationUser target)
+    {
+        if (!await UserManager.IsInRoleAsync(target, AdminRoles.Administrator))
+        {
+            return false;
+        }
+
+        var administrators = await UserManager.GetUsersInRoleAsync(AdminRoles.Administrator);
+        return administrators.Count <= 1;
+    }
+
+    private void SetSuccess(string text)
+    {
+        message = text;
+        isError = false;
+    }
+
+    private void SetError(string text)
+    {
+        message = text;
+        isError = true;
+    }
+
+    private static string Describe(IdentityResult result) =>
+        string.Join(" ", result.Errors.Select(error => error.Description));
+
+    private sealed class RoleOption(string name)
+    {
+        public string Name { get; } = name;
+        public bool Selected { get; set; }
+    }
+
+    private sealed class ProfileModel
+    {
+        [Required(ErrorMessage = "Укажите адрес электронной почты.")]
+        [EmailAddress(ErrorMessage = "Некорректный адрес электронной почты.")]
+        [Display(Name = "Электронная почта")]
+        public string? Email { get; set; }
+
+        [Display(Name = "Имя пользователя")]
+        public string? UserName { get; set; }
+
+        [RegularExpression(@"^[0-9+()\-\s]*$", ErrorMessage = "Некорректный номер телефона.")]
+        [Display(Name = "Телефон")]
+        public string? PhoneNumber { get; set; }
+
+        public bool EmailConfirmed { get; set; }
+    }
+
+    private sealed class CreateUserModel
+    {
+        [Required(ErrorMessage = "Укажите адрес электронной почты.")]
+        [EmailAddress(ErrorMessage = "Некорректный адрес электронной почты.")]
+        [Display(Name = "Электронная почта")]
+        public string? Email { get; set; }
+
+        [Display(Name = "Имя пользователя")]
+        public string? UserName { get; set; }
+
+        [RegularExpression(@"^[0-9+()\-\s]*$", ErrorMessage = "Некорректный номер телефона.")]
+        [Display(Name = "Телефон")]
+        public string? PhoneNumber { get; set; }
+
+        [Required(ErrorMessage = "Введите пароль.")]
+        [StringLength(100, MinimumLength = 6, ErrorMessage = "Длина пароля должна быть от 6 до 100 символов.")]
+        [DataType(DataType.Password)]
+        [Display(Name = "Пароль")]
+        public string Password { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        [Compare(nameof(Password), ErrorMessage = "Пароли не совпадают.")]
+        [Display(Name = "Повтор пароля")]
+        public string ConfirmPassword { get; set; } = "";
+
+        public bool EmailConfirmed { get; set; }
+    }
+
+    private sealed class PasswordModel
+    {
+        [Required(ErrorMessage = "Введите новый пароль.")]
+        [StringLength(100, MinimumLength = 6, ErrorMessage = "Длина пароля должна быть от 6 до 100 символов.")]
+        [DataType(DataType.Password)]
+        [Display(Name = "Новый пароль")]
+        public string NewPassword { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        [Compare(nameof(NewPassword), ErrorMessage = "Пароли не совпадают.")]
+        [Display(Name = "Повтор пароля")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

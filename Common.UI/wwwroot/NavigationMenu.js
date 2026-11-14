@@ -46,6 +46,9 @@
                 // Приватный режим браузера может запрещать localStorage.
             }
         }
+
+        // В свёрнутой панели текст скрыт — включаем подсказки с названиями страниц.
+        syncNavTooltips();
     }
 
     function applyInitialState() {
@@ -60,12 +63,25 @@
         }
     }
 
+    // После усиленной навигации Blazor возвращает серверный класс body,
+    // поэтому свёрнутое состояние нужно восстановить из localStorage.
+    function restoreCollapsedState() {
+        if (!isDesktop()) {
+            document.body.classList.remove(collapsedClass);
+            return;
+        }
+
+        setCollapsed(readStored(), false);
+    }
+
     function onBreakpointChange() {
         if (!isDesktop()) {
             document.body.classList.remove(collapsedClass);
         } else if (!userToggled) {
             setCollapsed(readStored(), false);
         }
+
+        syncNavTooltips();
     }
 
     /* ===============================
@@ -184,6 +200,125 @@
     });
 
     /* ===============================
+       Подсказки в свёрнутой панели
+       =============================== */
+
+    function tooltipApi() {
+        return window.bootstrap && window.bootstrap.Tooltip ? window.bootstrap.Tooltip : null;
+    }
+
+    function enableNavTooltips() {
+        var api = tooltipApi();
+
+        if (!api) {
+            return;
+        }
+
+        document.querySelectorAll('.cui-nav-link[data-cui-title]').forEach(function (element) {
+            if (api.getInstance(element)) {
+                return;
+            }
+
+            new api(element, {
+                title: element.getAttribute('data-cui-title'),
+                placement: 'right',
+                trigger: 'hover focus',
+                container: 'body'
+            });
+        });
+    }
+
+    function disableNavTooltips() {
+        var api = tooltipApi();
+
+        if (!api) {
+            return;
+        }
+
+        document.querySelectorAll('.cui-nav-link[data-cui-title]').forEach(function (element) {
+            var instance = api.getInstance(element);
+
+            if (instance) {
+                instance.dispose();
+            }
+        });
+    }
+
+    // Подсказки нужны только там, где пропадает текст: свёрнутая панель на десктопе.
+    function syncNavTooltips() {
+        if (isDesktop() && isCollapsed()) {
+            enableNavTooltips();
+        } else {
+            disableNavTooltips();
+        }
+    }
+
+    /* ===============================
+       Восстановление состояния после навигации
+       =============================== */
+
+    // Усиленная навигация Blazor подставляет серверную разметку: класс body
+    // со свёрнутой панелью пропадает, разделы раскрываются, а у новых ссылок
+    // ещё нет подсказок. Наблюдаем за DOM и возвращаем состояние.
+    function startMenuObserver() {
+        if (typeof MutationObserver === 'undefined' || !document.body) {
+            return;
+        }
+
+        var observer = new MutationObserver(function (mutations) {
+            var syncNeeded = false;
+
+            for (var i = 0; i < mutations.length; i++) {
+                var mutation = mutations[i];
+
+                if (mutation.type === 'attributes' && mutation.target === document.body) {
+                    if (!isDesktop()) {
+                        if (document.body.classList.contains(collapsedClass)) {
+                            document.body.classList.remove(collapsedClass);
+                        }
+                    } else if (readStored() && !document.body.classList.contains(collapsedClass)) {
+                        document.body.classList.add(collapsedClass);
+                    }
+
+                    syncNeeded = true;
+                    continue;
+                }
+
+                if (mutation.type !== 'childList') {
+                    continue;
+                }
+
+                var added = mutation.addedNodes;
+
+                for (var j = 0; j < added.length; j++) {
+                    var node = added[j];
+
+                    if (node instanceof Element &&
+                        (node.matches('.cui-nav-link[data-cui-title]') ||
+                            node.querySelector('.cui-nav-link[data-cui-title]') ||
+                            node.matches('[data-cui-section-key]') ||
+                            node.querySelector('[data-cui-section-key]'))) {
+                        syncNeeded = true;
+                        break;
+                    }
+                }
+            }
+
+            if (syncNeeded) {
+                restoreSections();
+                syncNavTooltips();
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class']
+        });
+    }
+
+    /* ===============================
        Клики
        =============================== */
 
@@ -223,10 +358,20 @@
     }
 
     document.addEventListener('click', onClick);
-    document.addEventListener('enhanced-navigation:load', function () {
-        applyInitialState();
+
+    function onEnhancedNavigation() {
+        restoreCollapsedState();
         restoreSections();
-    });
+        syncNavTooltips();
+    }
+
+    // В разных версиях Blazor событие усиленной навигации называется по-разному,
+    // поэтому подписываемся на оба имени, а наблюдатель за DOM служит страховкой.
+    document.addEventListener('enhancedload', onEnhancedNavigation);
+    document.addEventListener('enhanced-navigation:load', onEnhancedNavigation);
+
+    // Bootstrap может загружаться позже нашего скрипта (гибридные приложения).
+    window.addEventListener('load', syncNavTooltips);
 
     if (typeof desktopQuery.addEventListener === 'function') {
         desktopQuery.addEventListener('change', onBreakpointChange);
@@ -237,6 +382,8 @@
     function init() {
         applyInitialState();
         restoreSections();
+        syncNavTooltips();
+        startMenuObserver();
     }
 
     if (document.readyState === 'loading') {

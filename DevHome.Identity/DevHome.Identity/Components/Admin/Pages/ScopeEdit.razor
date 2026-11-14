@@ -1,0 +1,222 @@
+@page "/admin/scopes/{Id}"
+@attribute [Authorize(Roles = AdminRoles.Administrator)]
+@attribute [MenuItem("Область", Section = AdminNavigation.Section, Roles = AdminRoles.Administrator, Hidden = true)]
+@rendermode InteractiveServer
+@layout DevHome.Identity.Components.Admin.Shared.AdminLayout
+
+@inject IOpenIddictScopeManager ScopeManager
+@inject NavigationManager Navigation
+@inject ILogger<ScopeEdit> Logger
+
+<PageTitle>@model.Name</PageTitle>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+        <h2 class="h4 mb-1">Область <code>@model.Name</code></h2>
+        <p class="text-body-secondary mb-0 small">Имя области изменить нельзя: на него ссылаются разрешения клиентов.</p>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="@AdminNavigation.Scopes">
+        <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>К списку
+    </a>
+</div>
+
+@if (notFound)
+{
+    <div class="alert alert-warning" role="alert">Область не найдена. Возможно, её удалили.</div>
+}
+else
+{
+    @if (message is not null)
+    {
+        <div class="alert @(isError ? "alert-danger" : "alert-success")" role="alert">@message</div>
+    }
+
+    <div class="row g-4">
+        <div class="col-xl-7">
+            <div class="card">
+                <div class="card-header fw-semibold">Параметры области</div>
+                <div class="card-body">
+                    <EditForm Model="model" OnValidSubmit="SaveAsync" FormName="scope">
+                        <DataAnnotationsValidator />
+                        <div class="mb-3">
+                            <label class="form-label" for="scope-name">Имя</label>
+                            <input id="scope-name" class="form-control font-monospace" value="@model.Name" disabled />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="scope-title">Название</label>
+                            <InputText id="scope-title" class="form-control" @bind-Value="model.DisplayName" autocomplete="off" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="scope-description">Описание</label>
+                            <textarea id="scope-description" class="form-control" rows="3" @bind="model.Description"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="scope-resources">Ресурсы — по одному в строке</label>
+                            <textarea id="scope-resources" class="form-control font-monospace" rows="3" @bind="model.Resources"></textarea>
+                            <div class="form-text">Ресурсы попадают в audience access-токена и позволяют API отличить свои токены.</div>
+                        </div>
+                        <button type="submit" class="btn btn-primary" disabled="@isBusy">
+                            <i class="bi bi-check-lg me-1" aria-hidden="true"></i>Сохранить
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-5">
+            <div class="card border-danger">
+                <div class="card-header fw-semibold text-danger">Удаление области</div>
+                <div class="card-body">
+                    @if (!confirmDelete)
+                    {
+                        <p class="small text-body-secondary">
+                            Клиенты, у которых есть разрешение <code>scp:@model.Name</code>, продолжат работать,
+                            но запросить такую область больше не смогут.
+                        </p>
+                        <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => confirmDelete = true">
+                            <i class="bi bi-trash me-1" aria-hidden="true"></i>Удалить область
+                        </button>
+                    }
+                    else
+                    {
+                        <p class="small text-danger">Подтвердите удаление: <code>@model.Name</code></p>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-danger btn-sm" disabled="@isBusy" @onclick="DeleteAsync">
+                                Да, удалить
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => confirmDelete = false">
+                                Отмена
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string? Id { get; set; }
+
+    private object? scope;
+    private ScopeModel model = new();
+    private bool notFound;
+    private bool isBusy;
+    private bool confirmDelete;
+    private bool isError;
+    private string? message;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        notFound = false;
+        message = null;
+        confirmDelete = false;
+
+        scope = await ScopeManager.FindByIdAsync(Id!);
+        if (scope is null)
+        {
+            notFound = true;
+            return;
+        }
+
+        var descriptor = new OpenIddictScopeDescriptor();
+        await ScopeManager.PopulateAsync(descriptor, scope);
+
+        model = new ScopeModel
+        {
+            Name = descriptor.Name ?? string.Empty,
+            DisplayName = descriptor.DisplayName,
+            Description = descriptor.Description,
+            Resources = string.Join(Environment.NewLine, descriptor.Resources.OrderBy(resource => resource, StringComparer.Ordinal))
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        if (scope is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        message = null;
+
+        try
+        {
+            var descriptor = new OpenIddictScopeDescriptor();
+            await ScopeManager.PopulateAsync(descriptor, scope);
+
+            descriptor.DisplayName = string.IsNullOrWhiteSpace(model.DisplayName) ? null : model.DisplayName.Trim();
+            descriptor.Description = string.IsNullOrWhiteSpace(model.Description) ? null : model.Description.Trim();
+            descriptor.Resources.Clear();
+
+            foreach (var resource in SplitLines(model.Resources))
+            {
+                descriptor.Resources.Add(resource);
+            }
+
+            await ScopeManager.UpdateAsync(scope, descriptor);
+            SetSuccess("Область сохранена.");
+        }
+        catch (Exception exception) when (exception is OpenIddictExceptions.ValidationException or InvalidOperationException)
+        {
+            Logger.LogWarning(exception, "Не удалось сохранить область OpenIddict.");
+            SetError(exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (scope is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await ScopeManager.DeleteAsync(scope);
+            Logger.LogInformation("Администратор удалил область OpenIddict {Scope}.", model.Name);
+            Navigation.NavigateTo(AdminNavigation.Scopes);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private static IEnumerable<string> SplitLines(string? text) =>
+        (text ?? string.Empty)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.Ordinal);
+
+    private void SetSuccess(string text)
+    {
+        message = text;
+        isError = false;
+    }
+
+    private void SetError(string text)
+    {
+        message = text;
+        isError = true;
+    }
+
+    private sealed class ScopeModel
+    {
+        public string Name { get; set; } = "";
+
+        [Display(Name = "Название")]
+        public string? DisplayName { get; set; }
+
+        [Display(Name = "Описание")]
+        public string? Description { get; set; }
+
+        public string? Resources { get; set; }
+    }
+}

@@ -3,6 +3,7 @@
 Справочник по настройкам и функциям OpenIddict, подключённым в `DevHome.Identity`.
 Код: `DevHome.Identity/OpenIddict/*`, `Controllers/AuthorizationController.cs`, `Controllers/UserInfoController.cs`.
 Сценарии входа: [devhome-oauth.md](devhome-oauth.md).
+Админ-панель и личный кабинет: [identity-administration.md](identity-administration.md).
 
 ## 1. Три части OpenIddict
 

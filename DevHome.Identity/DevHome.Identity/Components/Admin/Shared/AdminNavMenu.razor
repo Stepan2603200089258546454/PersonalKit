@@ -1,0 +1,34 @@
+@* Навигация по разделам администрирования. Названия и адреса берутся из
+   AdminNavigation, чтобы перенаправления после сохранения не расходились с меню. *@
+<ul class="nav nav-pills flex-column gap-1">
+    <li class="nav-item">
+        <NavLink class="nav-link d-flex align-items-center gap-2" href="@AdminNavigation.Dashboard" Match="NavLinkMatch.All">
+            <i class="bi bi-speedometer2" aria-hidden="true"></i>
+            <span>Обзор</span>
+        </NavLink>
+    </li>
+    <li class="nav-item">
+        <NavLink class="nav-link d-flex align-items-center gap-2" href="@AdminNavigation.Users" Match="NavLinkMatch.Prefix">
+            <i class="bi bi-people" aria-hidden="true"></i>
+            <span>Пользователи</span>
+        </NavLink>
+    </li>
+    <li class="nav-item">
+        <NavLink class="nav-link d-flex align-items-center gap-2" href="@AdminNavigation.Clients" Match="NavLinkMatch.Prefix">
+            <i class="bi bi-window-stack" aria-hidden="true"></i>
+            <span>Клиенты</span>
+        </NavLink>
+    </li>
+    <li class="nav-item">
+        <NavLink class="nav-link d-flex align-items-center gap-2" href="@AdminNavigation.Scopes" Match="NavLinkMatch.Prefix">
+            <i class="bi bi-bounding-box-circles" aria-hidden="true"></i>
+            <span>Области</span>
+        </NavLink>
+    </li>
+    <li class="nav-item">
+        <NavLink class="nav-link d-flex align-items-center gap-2" href="@AdminNavigation.Tokens" Match="NavLinkMatch.Prefix">
+            <i class="bi bi-key" aria-hidden="true"></i>
+            <span>Токены</span>
+        </NavLink>
+    </li>
+</ul>

@@ -1,40 +1,63 @@
-﻿@using Microsoft.AspNetCore.Identity
-@using DevHome.Identity.DataContext.Models
+@using System.Security.Claims
 
-@inject SignInManager<ApplicationUser> SignInManager
+@* Навигация личного кабинета: три страницы вместо семи пунктов шаблона.
+   Почта перенесена в профиль, пароль и 2FA — в безопасность,
+   скачивание и удаление данных — в личные данные.
+   Данные пользователя берутся из cookie входа: обращение к базе здесь
+   выполнялось бы параллельно со страницей и мешало её запросам. *@
+<div class="card mb-3">
+    <div class="card-body d-flex align-items-center gap-3">
+        <div class="rounded-circle bg-primary-subtle text-primary-emphasis d-flex align-items-center justify-content-center flex-shrink-0"
+             style="width: 3rem; height: 3rem;">
+            <i class="bi bi-person-fill fs-4" aria-hidden="true"></i>
+        </div>
+        <div class="min-w-0">
+            <div class="fw-semibold text-truncate">@userName</div>
+            @if (!string.IsNullOrWhiteSpace(email))
+            {
+                <div class="small text-body-secondary text-truncate">@email</div>
+            }
+        </div>
+    </div>
+</div>
 
-<ul class="nav nav-pills flex-column">
+<ul class="nav nav-pills flex-column gap-1">
     <li class="nav-item">
-        <NavLink class="nav-link" href="Account/Manage" Match="NavLinkMatch.All">Профиль</NavLink>
+        <NavLink class="nav-link d-flex align-items-center gap-2" href="Account/Manage" Match="NavLinkMatch.All">
+            <i class="bi bi-person-vcard" aria-hidden="true"></i>
+            <span>Профиль</span>
+        </NavLink>
     </li>
     <li class="nav-item">
-        <NavLink class="nav-link" href="Account/Manage/Email">Электронная почта</NavLink>
+        <NavLink class="nav-link d-flex align-items-center gap-2" href="Account/Manage/Security">
+            <i class="bi bi-shield-lock" aria-hidden="true"></i>
+            <span>Безопасность</span>
+        </NavLink>
     </li>
     <li class="nav-item">
-        <NavLink class="nav-link" href="Account/Manage/ChangePassword">Пароль</NavLink>
-    </li>
-    @if (hasExternalLogins)
-    {
-        <li class="nav-item">
-            <NavLink class="nav-link" href="Account/Manage/ExternalLogins">Внешние способы входа</NavLink>
-        </li>
-    }
-    <li class="nav-item">
-        <NavLink class="nav-link" href="Account/Manage/TwoFactorAuthentication">Двухфакторная аутентификация</NavLink>
-    </li>
-    <li class="nav-item">
-        <NavLink class="nav-link" href="Account/Manage/Passkeys">Ключи доступа</NavLink>
-    </li>
-    <li class="nav-item">
-        <NavLink class="nav-link" href="Account/Manage/PersonalData">Личные данные</NavLink>
+        <NavLink class="nav-link d-flex align-items-center gap-2" href="Account/Manage/PersonalData">
+            <i class="bi bi-database-lock" aria-hidden="true"></i>
+            <span>Личные данные</span>
+        </NavLink>
     </li>
 </ul>
 
-@code {
-    private bool hasExternalLogins;
+<hr class="my-3" />
 
-    protected override async Task OnInitializedAsync()
+<a class="btn btn-outline-secondary btn-sm w-100" href="/">
+    <i class="bi bi-house-door me-1" aria-hidden="true"></i>На главную
+</a>
+
+@code {
+    private string? userName;
+    private string? email;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override void OnInitialized()
     {
-        hasExternalLogins = (await SignInManager.GetExternalAuthenticationSchemesAsync()).Any();
+        userName = HttpContext.User.Identity?.Name;
+        email = HttpContext.User.FindFirstValue(ClaimTypes.Email);
     }
 }

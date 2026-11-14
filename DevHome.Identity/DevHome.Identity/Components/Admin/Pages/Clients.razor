@@ -1,0 +1,148 @@
+﻿@page "/admin/clients"
+@attribute [Authorize(Roles = AdminRoles.Administrator)]
+@attribute [MenuItem("Клиенты", Description = "Клиентские приложения OpenIddict", Section = AdminNavigation.Section, Icon = "bi bi-window-stack", Roles = AdminRoles.Administrator, Order = 620)]
+@rendermode InteractiveServer
+@layout DevHome.Identity.Components.Admin.Shared.AdminLayout
+
+@inject IOpenIddictApplicationManager ApplicationManager
+@inject ILogger<Clients> Logger
+
+<PageTitle>Клиенты OpenIddict</PageTitle>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+        <h2 class="h4 mb-1">Клиентские приложения</h2>
+        <p class="text-body-secondary mb-0 small">
+            Приложения, которым Identity выдаёт токены. Всего: <strong>@clients.Count</strong>
+        </p>
+    </div>
+    <a class="btn btn-primary" href="@AdminNavigation.NewClient">
+        <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Создать клиента
+    </a>
+</div>
+
+@if (loadError is not null)
+{
+    <div class="alert alert-danger" role="alert">@loadError</div>
+}
+
+@if (clients.Count == 0)
+{
+    <div class="card">
+        <div class="card-body text-center text-body-secondary py-5">
+            <i class="bi bi-window-stack fs-1 d-block mb-2" aria-hidden="true"></i>
+            Клиенты не зарегистрированы.
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var client in clients)
+        {
+            <div class="col-xl-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex align-items-center justify-content-between gap-2">
+                        <code class="text-truncate">@client.ClientId</code>
+                        <div class="d-flex gap-1">
+                            <span class="badge @(client.ClientType == ClientTypes.Confidential ? "text-bg-primary" : "text-bg-info")">
+                                @(client.ClientType == ClientTypes.Confidential ? "конфиденциальный" : "публичный")
+                            </span>
+                            @if (client.HasSecret)
+                            {
+                                <span class="badge text-bg-secondary" title="Секрет задан">секрет</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <h3 class="h6 mb-2">@(client.DisplayName ?? "Без названия")</h3>
+                        <dl class="row small mb-0">
+                            <dt class="col-5 fw-normal text-body-secondary">Согласие</dt>
+                            <dd class="col-7 mb-1">@DescribeConsent(client.ConsentType)</dd>
+                            <dt class="col-5 fw-normal text-body-secondary">Адреса возврата</dt>
+                            <dd class="col-7 mb-1">@client.RedirectUriCount</dd>
+                            <dt class="col-5 fw-normal text-body-secondary">Сценарии</dt>
+                            <dd class="col-7 mb-1"><code>@string.Join(", ", client.GrantTypes.Select(value => OpenIddictPermissionCatalog.Describe(Permissions.Prefixes.GrantType + value)))</code></dd>
+                            <dt class="col-5 fw-normal text-body-secondary">Области</dt>
+                            <dd class="col-7 mb-1"><code>@string.Join(", ", client.Scopes)</code></dd>
+                            <dt class="col-5 fw-normal text-body-secondary">PKCE</dt>
+                            <dd class="col-7 mb-0">@(client.RequiresPkce ? "обязателен" : "не требуется")</dd>
+                        </dl>
+                    </div>
+                    <div class="card-footer bg-transparent d-flex justify-content-end gap-2">
+                        <a class="btn btn-sm btn-outline-primary" href="@AdminNavigation.Client(client.Id)">
+                            <i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Настроить
+                        </a>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<ClientRow> clients = [];
+    private string? loadError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var result = new List<ClientRow>();
+
+            await foreach (var application in ApplicationManager.ListAsync(null, null))
+            {
+                var descriptor = new OpenIddictApplicationDescriptor();
+                await ApplicationManager.PopulateAsync(descriptor, application);
+
+                result.Add(new ClientRow(
+                    await ApplicationManager.GetIdAsync(application),
+                    descriptor.ClientId,
+                    descriptor.DisplayName,
+                    descriptor.ClientType,
+                    descriptor.ConsentType,
+                    descriptor.RedirectUris.Count,
+                    descriptor.ClientSecret is not null,
+                    descriptor.Requirements.Contains(Requirements.Features.ProofKeyForCodeExchange),
+                    descriptor.Permissions
+                        .Where(permission => permission.StartsWith(Permissions.Prefixes.GrantType, StringComparison.Ordinal))
+                        .Select(permission => permission[Permissions.Prefixes.GrantType.Length..])
+                        .OrderBy(value => value, StringComparer.Ordinal)
+                        .ToArray(),
+                    descriptor.Permissions
+                        .Where(permission => permission.StartsWith(Permissions.Prefixes.Scope, StringComparison.Ordinal))
+                        .Select(permission => permission[Permissions.Prefixes.Scope.Length..])
+                        .OrderBy(value => value, StringComparer.Ordinal)
+                        .ToArray()));
+            }
+
+            clients = result.OrderBy(client => client.ClientId, StringComparer.Ordinal).ToList();
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось загрузить клиентов OpenIddict.");
+            loadError = $"Не удалось загрузить клиентов: {exception.Message}";
+        }
+    }
+
+    private static string DescribeConsent(string? consent) => consent switch
+    {
+        ConsentTypes.Implicit => "без экрана согласия",
+        ConsentTypes.Explicit => "спрашивать пользователя",
+        ConsentTypes.External => "внешнее согласие",
+        ConsentTypes.Systematic => "системное",
+        _ => consent ?? "не задано"
+    };
+
+    private sealed record ClientRow(
+        string? Id,
+        string? ClientId,
+        string? DisplayName,
+        string? ClientType,
+        string? ConsentType,
+        int RedirectUriCount,
+        bool HasSecret,
+        bool RequiresPkce,
+        string[] GrantTypes,
+        string[] Scopes);
+}

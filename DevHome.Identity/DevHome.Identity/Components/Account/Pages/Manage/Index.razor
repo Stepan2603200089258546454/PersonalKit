@@ -1,44 +1,175 @@
 ﻿@page "/Account/Manage"
+@attribute [MenuItem("Личный кабинет", Description = "Профиль, безопасность и личные данные", Section = "Аккаунт", Icon = "bi bi-person-gear", RequiresAuthorization = true, Order = 500)]
 
 @using System.ComponentModel.DataAnnotations
+@using System.Text
+@using System.Text.Encodings.Web
 @using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
 @using DevHome.Identity.DataContext.Models
 
 @inject UserManager<ApplicationUser> UserManager
 @inject SignInManager<ApplicationUser> SignInManager
+@inject IEmailSender<ApplicationUser> EmailSender
+@inject NavigationManager NavigationManager
 @inject IdentityRedirectManager RedirectManager
+@inject IWebHostEnvironment Environment
 
-<PageTitle>Профиль</PageTitle>
+<PageTitle>Личный кабинет</PageTitle>
 
-<h3>Профиль</h3>
-<StatusMessage Message="@message" />
+<h2 class="h4 mb-3">Профиль</h2>
 
-<div class="row">
+@if (message is not null)
+{
+    <div class="alert @(isError ? "alert-danger" : "alert-success")" role="alert">@message</div>
+}
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="small text-body-secondary">Электронная почта</div>
+                <div class="fw-semibold text-truncate mb-1">@email</div>
+                <span class="badge @(isEmailConfirmed ? "text-bg-success" : "text-bg-warning")">
+                    @(isEmailConfirmed ? "подтверждена" : "не подтверждена")
+                </span>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="small text-body-secondary">Пароль</div>
+                <div class="fw-semibold mb-1">@(hasPassword ? "задан" : "не задан")</div>
+                <a class="small text-decoration-none" href="Account/Manage/Security">Изменить</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="small text-body-secondary">Двухфакторная</div>
+                <div class="fw-semibold mb-1">@(twoFactorEnabled ? "включена" : "выключена")</div>
+                <a class="small text-decoration-none" href="Account/Manage/Security">Настроить</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="small text-body-secondary">Ключи доступа</div>
+                <div class="fw-semibold mb-1">@passkeyCount</div>
+                <a class="small text-decoration-none" href="Account/Manage/Security">Управлять</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
     <div class="col-xl-6">
-        <EditForm Model="Input" FormName="profile" OnValidSubmit="OnValidSubmitAsync" method="post">
-            <DataAnnotationsValidator />
-            <div role="alert" aria-atomic="true">
-                <ValidationSummary class="text-danger" />
+        <div class="card h-100">
+            <div class="card-header fw-semibold">Учётная запись</div>
+            <div class="card-body">
+                <EditForm Model="Input" FormName="profile" OnValidSubmit="OnProfileSubmitAsync" method="post">
+                    <DataAnnotationsValidator />
+                    <div role="alert" aria-atomic="true">
+                        <ValidationSummary class="text-danger" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="profile-username">Имя пользователя</label>
+                        <input id="profile-username" class="form-control" value="@username" disabled />
+                        <div class="form-text">Имя пользователя задаёт администратор.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="profile-phone">Номер телефона</label>
+                        <InputText id="profile-phone" class="form-control" @bind-Value="Input.PhoneNumber" autocomplete="tel" />
+                        <ValidationMessage For="() => Input.PhoneNumber" class="text-danger small" />
+                    </div>
+
+                    @if (roles.Count > 0)
+                    {
+                        <div class="mb-3">
+                            <div class="form-label">Роли</div>
+                            <div>
+                                @foreach (var role in roles)
+                                {
+                                    <span class="badge @(role == "Admin" ? "text-bg-primary" : "text-bg-secondary")">@role</span>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    <button type="submit" class="btn btn-primary" disabled="@isBusy">Сохранить</button>
+                </EditForm>
             </div>
-            <div class="form-floating mb-3">
-                <input type="text" value="@username" id="username" class="form-control" placeholder="Выберите имя пользователя." disabled />
-                <label for="username" class="form-label">Имя пользователя</label>
+        </div>
+    </div>
+
+    <div class="col-xl-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">Электронная почта</div>
+            <div class="card-body">
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                    <code class="text-break">@email</code>
+                    @if (isEmailConfirmed)
+                    {
+                        <span class="badge text-bg-success">подтверждена</span>
+                    }
+                    else
+                    {
+                        <span class="badge text-bg-warning">не подтверждена</span>
+                    }
+                </div>
+
+                @if (!isEmailConfirmed)
+                {
+                    <form @formname="send-verification" @onsubmit="OnSendVerificationAsync" method="post" class="mb-3">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm" disabled="@isBusy">
+                            <i class="bi bi-envelope-arrow-up me-1" aria-hidden="true"></i>Отправить письмо для подтверждения
+                        </button>
+                    </form>
+                }
+
+                <EditForm Model="EmailInput" FormName="change-email" OnValidSubmit="OnChangeEmailAsync" method="post">
+                    <DataAnnotationsValidator />
+                    <div class="mb-3">
+                        <label class="form-label" for="new-email">Новый адрес</label>
+                        <InputText id="new-email" class="form-control" @bind-Value="EmailInput.NewEmail" autocomplete="email" />
+                        <ValidationMessage For="() => EmailInput.NewEmail" class="text-danger small" />
+                    </div>
+                    <button type="submit" class="btn btn-outline-primary btn-sm" disabled="@isBusy">
+                        Изменить адрес электронной почты
+                    </button>
+                </EditForm>
+
+                @if (devLink is not null && Environment.IsDevelopment())
+                {
+                    <div class="alert alert-info small mt-3 mb-0" role="status">
+                        <div class="fw-semibold">Почта не отправляется: приложение работает без SMTP.</div>
+                        Ссылка для разработки:
+                        <a class="text-break" href="@devLink">подтвердить изменение</a>
+                    </div>
+                }
             </div>
-            <div class="form-floating mb-3">
-                <InputText @bind-Value="Input.PhoneNumber" id="Input.PhoneNumber" class="form-control" placeholder="Введите номер телефона" />
-                <label for="Input.PhoneNumber" class="form-label">Номер телефона</label>
-                <ValidationMessage For="() => Input.PhoneNumber" class="text-danger" />
-            </div>
-            <button type="submit" class="w-100 btn btn-lg btn-primary">Сохранить</button>
-        </EditForm>
+        </div>
     </div>
 </div>
 
 @code {
     private string? message;
+    private bool isError;
+    private bool isBusy;
+    private string? devLink;
     private ApplicationUser? user;
     private string? username;
-    private string? phoneNumber;
+    private string? email;
+    private bool isEmailConfirmed;
+    private bool hasPassword;
+    private bool twoFactorEnabled;
+    private int passkeyCount;
+    private List<string> roles = [];
 
     [CascadingParameter]
     private HttpContext HttpContext { get; set; } = default!;
@@ -46,14 +177,18 @@
     [SupplyParameterFromTempData(Name = IdentityRedirectManager.StatusMessageKey)]
     private string? IdentityStatusMessage { get; set; }
 
-    [SupplyParameterFromForm]
-    private InputModel Input { get; set; } = default!;
+    [SupplyParameterFromForm(FormName = "profile")]
+    private ProfileInput Input { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "change-email")]
+    private EmailInputModel EmailInput { get; set; } = default!;
 
     protected override async Task OnInitializedAsync()
     {
         message = IdentityStatusMessage;
         IdentityStatusMessage = null;
         Input ??= new();
+        EmailInput ??= new();
 
         user = await UserManager.GetUserAsync(HttpContext.User);
         if (user is null)
@@ -63,12 +198,18 @@
         }
 
         username = await UserManager.GetUserNameAsync(user);
-        phoneNumber = await UserManager.GetPhoneNumberAsync(user);
+        email = await UserManager.GetEmailAsync(user);
+        isEmailConfirmed = await UserManager.IsEmailConfirmedAsync(user);
+        hasPassword = await UserManager.HasPasswordAsync(user);
+        twoFactorEnabled = await UserManager.GetTwoFactorEnabledAsync(user);
+        passkeyCount = (await UserManager.GetPasskeysAsync(user)).Count;
+        roles = (await UserManager.GetRolesAsync(user)).OrderBy(role => role, StringComparer.Ordinal).ToList();
 
-        Input.PhoneNumber ??= phoneNumber;
+        Input.PhoneNumber ??= await UserManager.GetPhoneNumberAsync(user);
+        EmailInput.NewEmail ??= email;
     }
 
-    private async Task OnValidSubmitAsync()
+    private async Task OnProfileSubmitAsync()
     {
         if (user is null)
         {
@@ -76,26 +217,118 @@
             return;
         }
 
-        if (Input.PhoneNumber != phoneNumber)
+        isBusy = true;
+        try
         {
-            var setPhoneResult = await UserManager.SetPhoneNumberAsync(user, Input.PhoneNumber);
-            if (!setPhoneResult.Succeeded)
+            var phoneNumber = await UserManager.GetPhoneNumberAsync(user);
+            if (Input.PhoneNumber != phoneNumber)
             {
-                IdentityStatusMessage = "Ошибка: не удалось задать номер телефона.";
-                RedirectManager.RedirectToCurrentPage();
-                return;
+                var result = await UserManager.SetPhoneNumberAsync(user, Input.PhoneNumber);
+                if (!result.Succeeded)
+                {
+                    SetError("Не удалось сохранить номер телефона: " + Describe(result));
+                    return;
+                }
             }
-        }
 
-        await SignInManager.RefreshSignInAsync(user);
-        IdentityStatusMessage = "Профиль обновлён.";
-        RedirectManager.RedirectToCurrentPage();
+            await SignInManager.RefreshSignInAsync(user);
+            message = "Профиль обновлён.";
+            isError = false;
+        }
+        finally
+        {
+            isBusy = false;
+        }
     }
 
-    private sealed class InputModel
+    private async Task OnChangeEmailAsync()
     {
-        [Phone]
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/InvalidUser");
+            return;
+        }
+
+        var newEmail = EmailInput.NewEmail?.Trim();
+        if (string.IsNullOrWhiteSpace(newEmail) || string.Equals(newEmail, email, StringComparison.OrdinalIgnoreCase))
+        {
+            SetError("Адрес электронной почты не изменён.");
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var userId = await UserManager.GetUserIdAsync(user);
+            var code = await UserManager.GenerateChangeEmailTokenAsync(user, newEmail);
+            code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
+            var callbackUrl = NavigationManager.GetUriWithQueryParameters(
+                NavigationManager.ToAbsoluteUri("Account/ConfirmEmailChange").AbsoluteUri,
+                new Dictionary<string, object?> { ["userId"] = userId, ["email"] = newEmail, ["code"] = code });
+
+            await EmailSender.SendConfirmationLinkAsync(user, newEmail, HtmlEncoder.Default.Encode(callbackUrl));
+
+            devLink = callbackUrl;
+            message = "Ссылка для подтверждения нового адреса отправлена. Проверьте почту.";
+            isError = false;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task OnSendVerificationAsync()
+    {
+        if (user is null || email is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            var userId = await UserManager.GetUserIdAsync(user);
+            var code = await UserManager.GenerateEmailConfirmationTokenAsync(user);
+            code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
+            var callbackUrl = NavigationManager.GetUriWithQueryParameters(
+                NavigationManager.ToAbsoluteUri("Account/ConfirmEmail").AbsoluteUri,
+                new Dictionary<string, object?> { ["userId"] = userId, ["code"] = code });
+
+            await EmailSender.SendConfirmationLinkAsync(user, email, HtmlEncoder.Default.Encode(callbackUrl));
+
+            devLink = callbackUrl;
+            message = "Письмо для подтверждения отправлено. Проверьте почту.";
+            isError = false;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void SetError(string text)
+    {
+        message = text;
+        isError = true;
+        devLink = null;
+    }
+
+    private static string Describe(IdentityResult result) =>
+        string.Join(" ", result.Errors.Select(error => error.Description));
+
+    private sealed class ProfileInput
+    {
+        [RegularExpression(@"^[0-9+()\-\s]*$", ErrorMessage = "Некорректный номер телефона.")]
         [Display(Name = "Номер телефона")]
         public string? PhoneNumber { get; set; }
+    }
+
+    private sealed class EmailInputModel
+    {
+        [Required(ErrorMessage = "Укажите новый адрес электронной почты.")]
+        [EmailAddress(ErrorMessage = "Некорректный адрес электронной почты.")]
+        [Display(Name = "Новый адрес электронной почты")]
+        public string? NewEmail { get; set; }
     }
 }

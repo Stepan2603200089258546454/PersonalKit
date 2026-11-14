@@ -1,8 +1,17 @@
-﻿@page "/Account/AccessDenied"
+@page "/Account/AccessDenied"
 
 <PageTitle>Доступ запрещён</PageTitle>
 
-<header>
-    <h1 class="text-danger">Доступ запрещён</h1>
-    <p class="text-danger">У вас нет доступа к этому ресурсу.</p>
-</header>
+<h1 class="h3 mb-3">Доступ запрещён</h1>
+
+<div class="alert alert-warning" role="alert">
+    <p class="mb-2">У вас нет прав на эту страницу.</p>
+    <p class="mb-0 small">
+        Если страница нужна для работы, попросите администратора выдать соответствующую роль.
+    </p>
+</div>
+
+<div class="d-flex flex-wrap gap-2">
+    <a class="btn btn-primary" href="/">На главную</a>
+    <a class="btn btn-outline-secondary" href="Account/Manage">Личный кабинет</a>
+</div>

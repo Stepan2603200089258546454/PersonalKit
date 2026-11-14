@@ -73,6 +73,6 @@
         var userId = await UserManager.GetUserIdAsync(user);
         Logger.LogInformation("Пользователь с идентификатором '{UserId}' отключил 2FA.", userId);
         IdentityStatusMessage = "2FA отключена. Вы сможете снова включить 2FA, когда настроите приложение-аутентификатор.";
-        RedirectManager.RedirectTo("Account/Manage/TwoFactorAuthentication");
+        RedirectManager.RedirectTo("Account/Manage/Security");
     }
 }

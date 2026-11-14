@@ -1,4 +1,4 @@
-<Solution>
+﻿<Solution>
   <Folder Name="/Applications/" />
   <Folder Name="/Applications/Identity/">
     <Project Path="DevHome.Identity.DataContext/DevHome.Identity.DataContext.csproj" Id="69df1329-478c-47bd-8ef0-22a8e2bc6d37" />
@@ -35,6 +35,7 @@
     <File Path="AgentsDocs/common-ui.md" />
     <File Path="AgentsDocs/devhome-oauth.md" />
     <File Path="AgentsDocs/http-client-template.md" />
+    <File Path="AgentsDocs/identity-administration.md" />
     <File Path="AgentsDocs/openiddict-reference.md" />
     <File Path="AgentsDocs/README.md" />
   </Folder>

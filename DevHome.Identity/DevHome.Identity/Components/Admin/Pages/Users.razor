@@ -1,0 +1,332 @@
+﻿@page "/admin/users"
+@attribute [Authorize(Roles = AdminRoles.Administrator)]
+@attribute [MenuItem("Пользователи", Description = "Учётные записи, роли и доступ", Section = AdminNavigation.Section, Icon = "bi bi-people", Roles = AdminRoles.Administrator, Order = 610)]
+@rendermode InteractiveServer
+@layout DevHome.Identity.Components.Admin.Shared.AdminLayout
+
+@inject IDbContextFactory<DBContext> DbFactory
+@inject ILogger<Users> Logger
+
+<PageTitle>Пользователи</PageTitle>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+        <h2 class="h4 mb-1">Пользователи</h2>
+        <p class="text-body-secondary mb-0 small">
+            Всего учётных записей: <strong>@total</strong>
+            @if (!string.IsNullOrWhiteSpace(search) || !string.IsNullOrWhiteSpace(roleFilter))
+            {
+                <span>· найдено по фильтру</span>
+            }
+        </p>
+    </div>
+    <a class="btn btn-primary" href="@AdminNavigation.NewUser">
+        <i class="bi bi-person-plus me-1" aria-hidden="true"></i>Создать пользователя
+    </a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form class="row g-2 align-items-end" @onsubmit="SearchAsync" @onsubmit:preventDefault>
+            <div class="col-md-6">
+                <label class="form-label small text-body-secondary" for="user-search">Поиск</label>
+                <input id="user-search" class="form-control" type="search" placeholder="Почта, имя пользователя или телефон"
+                       @bind="search" @bind:event="oninput" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small text-body-secondary" for="role-filter">Роль</label>
+                <select id="role-filter" class="form-select" @bind="roleFilter" @bind:after="SearchAsync">
+                    <option value="">Все роли</option>
+                    @foreach (var role in roleNames)
+                    {
+                        <option value="@role.Name">@role.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2 d-flex gap-2">
+                <button type="submit" class="btn btn-outline-primary w-100">
+                    <i class="bi bi-search me-1" aria-hidden="true"></i>Найти
+                </button>
+                <button type="button" class="btn btn-outline-secondary" title="Сбросить фильтры" @onclick="ResetFiltersAsync">
+                    <i class="bi bi-x-lg" aria-hidden="true"></i>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@if (loadError is not null)
+{
+    <div class="alert alert-danger" role="alert">@loadError</div>
+}
+
+<div class="card">
+    @if (users.Count == 0)
+    {
+        <div class="card-body text-center text-body-secondary py-5">
+            <i class="bi bi-people fs-1 d-block mb-2" aria-hidden="true"></i>
+            Пользователи не найдены.
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Пользователь</th>
+                        <th scope="col">Роли</th>
+                        <th scope="col">Почта</th>
+                        <th scope="col">2FA</th>
+                        <th scope="col">Доступ</th>
+                        <th scope="col" class="text-end">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var user in users)
+                    {
+                        <tr>
+                            <td>
+                                <div class="fw-semibold text-truncate" style="max-width: 16rem;">@user.UserName</div>
+                                <div class="small text-body-secondary text-truncate" style="max-width: 16rem;">
+                                    @(user.Email ?? "почта не задана")
+                                </div>
+                            </td>
+                            <td>
+                                @if (user.Roles.Count == 0)
+                                {
+                                    <span class="badge text-bg-light border">без ролей</span>
+                                }
+                                else
+                                {
+                                    @foreach (var role in user.Roles)
+                                    {
+                                        <span class="badge @(role == AdminRoles.Administrator ? "text-bg-primary" : "text-bg-secondary")">@role</span>
+                                    }
+                                }
+                            </td>
+                            <td>
+                                @if (user.EmailConfirmed)
+                                {
+                                    <span class="badge text-bg-success">подтверждена</span>
+                                }
+                                else
+                                {
+                                    <span class="badge text-bg-warning">не подтверждена</span>
+                                }
+                            </td>
+                            <td>
+                                @if (user.TwoFactorEnabled)
+                                {
+                                    <span class="badge text-bg-success">включена</span>
+                                }
+                                else
+                                {
+                                    <span class="badge text-bg-light border">выключена</span>
+                                }
+                            </td>
+                            <td>
+                                @if (user.IsLocked)
+                                {
+                                    <span class="badge text-bg-danger" title="Блокировка до @user.LockoutEnd">заблокирован</span>
+                                }
+                                else
+                                {
+                                    <span class="badge text-bg-success">активен</span>
+                                }
+                            </td>
+                            <td class="text-end">
+                                <a class="btn btn-sm btn-outline-primary" href="@AdminNavigation.User(user.Id)">
+                                    <i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Открыть
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card-footer d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <span class="small text-body-secondary">
+                Страница @currentPage из @TotalPages
+            </span>
+            <div class="btn-group">
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(currentPage <= 1)" @onclick="PreviousPageAsync">
+                    <i class="bi bi-chevron-left" aria-hidden="true"></i>Назад
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(currentPage >= TotalPages)" @onclick="NextPageAsync">
+                    Вперёд<i class="bi bi-chevron-right ms-1" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private const int PageSize = 15;
+
+    private string? search;
+    private string? roleFilter;
+    private string? loadError;
+    private int currentPage = 1;
+    private int total;
+    private List<RoleOption> roleNames = [];
+    private List<UserRow> users = [];
+
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(total / (double)PageSize));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadRolesAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadRolesAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        roleNames = await db.Roles
+            .AsNoTracking()
+            .OrderBy(role => role.Name)
+            .Select(role => new RoleOption(role.Id, role.Name!))
+            .ToListAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loadError = null;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            IQueryable<ApplicationUser> query = db.Users.AsNoTracking();
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim().ToLowerInvariant();
+                query = query.Where(user =>
+                    (user.Email ?? string.Empty).ToLower().Contains(term) ||
+                    (user.UserName ?? string.Empty).ToLower().Contains(term) ||
+                    (user.PhoneNumber ?? string.Empty).Contains(term));
+            }
+
+            if (!string.IsNullOrWhiteSpace(roleFilter))
+            {
+                var roleId = roleNames.FirstOrDefault(role => role.Name == roleFilter)?.Id;
+                if (roleId is not null)
+                {
+                    query = query.Where(user => db.UserRoles.Any(link => link.UserId == user.Id && link.RoleId == roleId));
+                }
+            }
+
+            total = await query.CountAsync();
+            currentPage = Math.Clamp(currentPage, 1, TotalPages);
+
+            var rows = await query
+                .OrderBy(user => user.Email)
+                .ThenBy(user => user.UserName)
+                .Skip((currentPage - 1) * PageSize)
+                .Take(PageSize)
+                .Select(user => new
+                {
+                    user.Id,
+                    user.UserName,
+                    user.Email,
+                    user.EmailConfirmed,
+                    user.TwoFactorEnabled,
+                    user.LockoutEnd
+                })
+                .ToListAsync();
+
+            var userIds = rows.Select(row => row.Id).ToList();
+            var roles = await (
+                    from link in db.UserRoles.AsNoTracking()
+                    join role in db.Roles.AsNoTracking() on link.RoleId equals role.Id
+                    where userIds.Contains(link.UserId)
+                    select new { link.UserId, RoleName = role.Name })
+                .ToListAsync();
+
+            users = rows
+                .Select(row =>
+                {
+                    var item = new UserRow(
+                        row.Id,
+                        row.UserName,
+                        row.Email,
+                        row.EmailConfirmed,
+                        row.TwoFactorEnabled,
+                        row.LockoutEnd);
+
+                    item.Roles.AddRange(roles
+                        .Where(role => role.UserId == row.Id)
+                        .Select(role => role.RoleName!)
+                        .OrderBy(name => name, StringComparer.Ordinal));
+
+                    return item;
+                })
+                .ToList();
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось загрузить список пользователей.");
+            loadError = $"Не удалось загрузить список пользователей: {exception.Message}";
+            users = [];
+            total = 0;
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        currentPage = 1;
+        await LoadAsync();
+    }
+
+    private async Task ResetFiltersAsync()
+    {
+        search = null;
+        roleFilter = null;
+        await SearchAsync();
+    }
+
+    private async Task PreviousPageAsync()
+    {
+        if (currentPage <= 1)
+        {
+            return;
+        }
+
+        currentPage--;
+        await LoadAsync();
+    }
+
+    private async Task NextPageAsync()
+    {
+        if (currentPage >= TotalPages)
+        {
+            return;
+        }
+
+        currentPage++;
+        await LoadAsync();
+    }
+
+    private sealed record RoleOption(string Id, string Name);
+
+    private sealed class UserRow(
+        string id,
+        string? userName,
+        string? email,
+        bool emailConfirmed,
+        bool twoFactorEnabled,
+        DateTimeOffset? lockoutEnd)
+    {
+        public string Id { get; } = id;
+        public string? UserName { get; } = userName;
+        public string? Email { get; } = email;
+        public bool EmailConfirmed { get; } = emailConfirmed;
+        public bool TwoFactorEnabled { get; } = twoFactorEnabled;
+        public DateTimeOffset? LockoutEnd { get; } = lockoutEnd;
+        public List<string> Roles { get; } = [];
+        public bool IsLocked => LockoutEnd > DateTimeOffset.UtcNow;
+    }
+}

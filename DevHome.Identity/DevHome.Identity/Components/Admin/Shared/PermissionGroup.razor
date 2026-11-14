@@ -1,0 +1,45 @@
+@* Группа флажков разрешений OpenIddict. Выбор хранится в HashSet родителя,
+   поэтому компонент только сообщает, какой пункт включили или выключили. *@
+<div class="mb-3">
+    <div class="fw-semibold mb-1">@Title</div>
+    <div class="row g-1">
+        @for (var index = 0; index < Options.Count; index++)
+        {
+            var option = Options[index];
+            var inputId = $"{groupId}-{index}";
+
+            <div class="col-md-6">
+                <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           id="@inputId"
+                           checked="@Selected.Contains(option.Value)"
+                           @onchange="args => OnToggle.InvokeAsync((option.Value, args.Value is true))" />
+                    <label class="form-check-label" for="@inputId">
+                        @option.Title
+                        @if (!string.IsNullOrWhiteSpace(option.Hint))
+                        {
+                            <span class="d-block small text-body-secondary">@option.Hint</span>
+                        }
+                    </label>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly string groupId = $"cui-perm-{Guid.NewGuid():N}";
+
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<PermissionOption> Options { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public HashSet<string> Selected { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<(string Value, bool Selected)> OnToggle { get; set; }
+}
