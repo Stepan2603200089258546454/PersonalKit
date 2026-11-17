@@ -20,6 +20,14 @@
 - `openiddict-reference.md` — настройки и функции OpenIddict: что за что отвечает.
 - `identity-administration.md` — админ-панель и личный кабинет `DevHome.Identity`:
   роли, страницы управления пользователями и OpenIddict, объединённые маршруты.
+- `security-sessions.md` — устройства, сеансы, политики входа, отзыв и блокировка,
+  журнал безопасности и диагностика.
+- `../Common.Security.OpenIddict.Server/README.md` — серверная библиотека OpenIddict
+  и учёта устройств/сеансов.
+- `../Common.Security.OpenIddict.Client/README.md` — клиентская библиотека для WPF,
+  MAUI и CLI.
+- `../Common.Security.OpenIddict.Client.Web/README.md` — веб-клиент и проверка токенов
+  в API.
 - `common-ui.md` — библиотека компонентов `Common.UI`: меню, темы, атрибуты страниц.
 - `docker.md` — запуск DevHome, Identity и API в Docker Desktop: режимы сборки,
   версии, PostgreSQL, локальная сеть, диагностика.

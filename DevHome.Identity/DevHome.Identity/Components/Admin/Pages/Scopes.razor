@@ -1,6 +1,6 @@
 @page "/admin/scopes"
 @attribute [Authorize(Roles = AdminRoles.Administrator)]
-@attribute [MenuItem("Области", Description = "Области доступа OpenIddict", Section = AdminNavigation.Section, Icon = "bi bi-bounding-box-circles", Roles = AdminRoles.Administrator, Order = 630)]
+@attribute [MenuItem("Области", Description = "Области доступа OpenIddict", Section = AdminNavigation.Section, Icon = "bi bi-bounding-box-circles", Roles = AdminRoles.Administrator, Order = 640)]
 @rendermode InteractiveServer
 @layout DevHome.Identity.Components.Admin.Shared.AdminLayout
 
@@ -22,6 +22,21 @@
 {
     <div class="alert @(isError ? "alert-danger" : "alert-success")" role="alert">@message</div>
 }
+
+<div class="alert alert-info" role="status">
+    <div class="fw-semibold mb-1">Зачем нужны области</div>
+    <p class="mb-1 small">
+        Область — это разрешение на часть данных. <code>openid</code> даёт идентификатор
+        пользователя, <code>profile</code> — имя, <code>email</code> — почту,
+        <code>offline_access</code> — refresh-токен, <code>devhome.api</code> — доступ к API.
+    </p>
+    <p class="mb-0 small">
+        <strong>Ресурсы</strong> — аудитории, для которых выдан токен. Для API DevHome в ресурсы
+        входят <code>devhome.api</code> и клиент <code>devhome-api</code>: без второго API не сможет
+        проверить токен через introspection. Не удаляйте области, которые запрашивают работающие
+        приложения.
+    </p>
+</div>
 
 <div class="row g-4">
     <div class="col-xl-8">

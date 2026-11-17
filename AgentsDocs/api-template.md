@@ -10,6 +10,10 @@ API не читает базу Identity и не хранит ключи подп
 действителен ли токен, через endpoint introspection. Поэтому API можно запускать
 отдельно от Identity и обновлять независимо.
 
+Подключение проверки токенов вынесено в `Common.Security.OpenIddict.Client.Web`:
+`builder.Services.AddOpenIddictApiValidation(new OpenIddictApiValidationOptions { ... })`.
+Подробности — в `../Common.Security.OpenIddict.Client.Web/README.md`.
+
 ## 1. Где находится
 
 | Что | Путь |

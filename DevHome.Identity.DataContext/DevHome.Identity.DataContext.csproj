@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Common.Helper.DataBase\Common.Helper.DataBase.csproj" />
+    <ProjectReference Include="..\Common.Security.OpenIddict.Server\Common.Security.OpenIddict.Server.csproj" />
   </ItemGroup>
 
 </Project>

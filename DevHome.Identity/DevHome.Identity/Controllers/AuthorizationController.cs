@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Common.Security.OpenIddict.Server.Security;
 using DevHome.Identity.DataContext.Models;
 using DevHome.Identity.OpenIddict;
 using Microsoft.AspNetCore;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
@@ -23,22 +25,19 @@ namespace DevHome.Identity.Controllers;
 /// </remarks>
 public sealed class AuthorizationController(
     UserManager<ApplicationUser> userManager,
-    SignInManager<ApplicationUser> signInManager) : Controller
+    SignInManager<ApplicationUser> signInManager,
+    IOpenIddictApplicationManager applicationManager,
+    IUserSecurityService userSecurityService,
+    IOptions<UserSecurityOptions> securityOptions,
+    ILogger<AuthorizationController> logger) : Controller
 {
     /// <summary>
     /// Точка входа authorization code flow. Если пользователь не вошёл,
     /// перенаправляет на страницу входа Identity и возвращается сюда после неё.
     /// </summary>
-    /// <remarks>
-    /// Сценарий: DevHome открывает /connect/authorize → Identity проверяет вход →
-    /// возвращает браузер в DevHome с одноразовым кодом → DevHome меняет код
-    /// на токены в /connect/token. Код бесполезен без PKCE-verifier.
-    /// </remarks>
     [HttpGet("~/connect/authorize")]
     public async Task<IActionResult> Authorize()
     {
-        // OpenIddict разбирает и проверяет запрос (client_id, redirect_uri, scope,
-        // code_challenge) до вызова контроллера; здесь остаётся только результат.
         if (HttpContext.GetOpenIddictServerRequest() is not { } request)
         {
             return BadRequest("Не удалось прочитать OpenID Connect-запрос.");
@@ -46,8 +45,6 @@ public sealed class AuthorizationController(
 
         if (User.Identity?.IsAuthenticated != true)
         {
-            // Challenge отправляет пользователя на страницу входа Identity,
-            // сохраняя исходный адрес, чтобы вернуться к нему после входа.
             return Challenge(
                 new AuthenticationProperties
                 {
@@ -67,25 +64,60 @@ public sealed class AuthorizationController(
                 IdentityConstants.ApplicationScheme);
         }
 
-        var principal = await CreatePrincipalAsync(user, request.GetScopes());
+        var userId = await userManager.GetUserIdAsync(user);
+        var sessionId = ReadSessionId();
+        if (sessionId is null)
+        {
+            // Cookie без sid — старая версия входа или вход до появления учёта
+            // сеансов. Завершаем cookie и просим войти заново.
+            await signInManager.SignOutAsync();
+            return Challenge(
+                new AuthenticationProperties
+                {
+                    RedirectUri = Request.PathBase + Request.Path + Request.QueryString
+                },
+                IdentityConstants.ApplicationScheme);
+        }
 
-        // SignIn с серверной схемой OpenIddict: ответ формирует OpenIddict,
-        // он же подписывает код авторизации/токен и делает редирект клиенту.
+        var validation = await userSecurityService.ValidateSessionAsync(userId, sessionId.Value);
+        if (!validation.IsActive)
+        {
+            await signInManager.SignOutAsync();
+            return Challenge(
+                new AuthenticationProperties
+                {
+                    RedirectUri = Request.PathBase + Request.Path + Request.QueryString
+                },
+                IdentityConstants.ApplicationScheme);
+        }
+
+        var clientId = request.ClientId ?? "unknown";
+        var application = await applicationManager.FindByClientIdAsync(clientId);
+        var applicationName = application is null
+            ? null
+            : await applicationManager.GetDisplayNameAsync(application);
+
+        await RecordApplicationSafeAsync(
+            userId,
+            sessionId.Value,
+            clientId,
+            applicationName,
+            request.GetScopes());
+
+        var principal = await CreatePrincipalAsync(user, request.GetScopes(), sessionId.Value);
+
         return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 
     /// <summary>
-    /// Завершение сеанса: удаляет cookie Identity и завершает сеанс OpenIddict.
+    /// Завершение сеанса: отзывает запись сеанса, удаляет cookie Identity
+    /// и завершает сеанс OpenIddict.
     /// </summary>
-    /// <remarks>
-    /// Сначала закрывается локальный сеанс Identity, затем OpenIddict завершает
-    /// сеанс у клиента (front-channel/back-channel logout) и возвращает его
-    /// на адрес из post_logout_redirect_uri.
-    /// </remarks>
     [HttpGet("~/connect/logout")]
     [HttpPost("~/connect/logout")]
     public async Task<IActionResult> Logout()
     {
+        await RevokeCurrentSessionAsync("Пользователь вышел через OpenID Connect.");
         await HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
         await signInManager.SignOutAsync();
 
@@ -95,16 +127,11 @@ public sealed class AuthorizationController(
     /// <summary>
     /// Страница подтверждения кода устройства. Пользователь должен быть аутентифицирован.
     /// </summary>
-    /// <remarks>
-    /// Device code flow: CLI получает код на /connect/deviceauthorization и показывает
-    /// пользователю. Пользователь открывает эту страницу, вводит код и подтверждает вход.
-    /// </remarks>
     [HttpGet("~/connect/verify")]
     public IActionResult Verify(string? user_code)
     {
         if (User.Identity?.IsAuthenticated != true)
         {
-            // Код показывается уже после входа, иначе подтверждать было бы некому.
             return Challenge(
                 new AuthenticationProperties
                 {
@@ -113,7 +140,6 @@ public sealed class AuthorizationController(
                 IdentityConstants.ApplicationScheme);
         }
 
-        // Код подставляется в форму, чтобы пользователю не пришлось вводить его с устройства.
         ViewData["UserCode"] = user_code ?? string.Empty;
         return View();
     }
@@ -121,9 +147,6 @@ public sealed class AuthorizationController(
     /// <summary>
     /// Подтверждение кода устройства: OpenIddict связывает пользователя с ожидающим device code.
     /// </summary>
-    /// <remarks>
-    /// После этого ответа CLI при следующем опросе /connect/token получит токены.
-    /// </remarks>
     [HttpPost("~/connect/verify")]
     [IgnoreAntiforgeryToken]
     public async Task<IActionResult> Verify(string user_code, string action)
@@ -138,8 +161,6 @@ public sealed class AuthorizationController(
                 IdentityConstants.ApplicationScheme);
         }
 
-        // Пользователь может отказать: тогда CLI получит ошибку доступа
-        // и не будет ждать токен до истечения кода устройства.
         if (!string.Equals(action, "approve", StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest("Подтверждение отклонено пользователем.");
@@ -151,31 +172,110 @@ public sealed class AuthorizationController(
             return BadRequest("Не удалось загрузить пользователя.");
         }
 
+        var userId = await userManager.GetUserIdAsync(user);
+        var sessionId = ReadSessionId();
+        if (sessionId is null)
+        {
+            return Challenge(
+                new AuthenticationProperties
+                {
+                    RedirectUri = Request.PathBase + Request.Path + Request.QueryString
+                },
+                IdentityConstants.ApplicationScheme);
+        }
+
         var request = HttpContext.GetOpenIddictServerRequest();
         IEnumerable<string> scopes = request is null ? DevHomeScopes.User : request.GetScopes().ToArray();
-        var principal = await CreatePrincipalAsync(user, scopes);
+
+        if (request?.ClientId is { Length: > 0 } clientId)
+        {
+            var application = await applicationManager.FindByClientIdAsync(clientId);
+            var applicationName = application is null
+                ? null
+                : await applicationManager.GetDisplayNameAsync(application);
+
+            await RecordApplicationSafeAsync(
+                userId,
+                sessionId.Value,
+                clientId,
+                applicationName,
+                scopes);
+        }
+
+        var principal = await CreatePrincipalAsync(user, scopes, sessionId.Value);
 
         return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+    }
+
+    private async Task RecordApplicationSafeAsync(
+        string userId,
+        Guid sessionId,
+        string clientId,
+        string? applicationName,
+        IEnumerable<string> scopes)
+    {
+        try
+        {
+            await userSecurityService.RecordApplicationAsync(
+                userId,
+                sessionId,
+                clientId,
+                applicationName,
+                scopes,
+                RequestContextInfo.FromHttpContext(
+                    HttpContext,
+                    securityOptions.Value.TrustForwardedHeaders));
+        }
+        catch (Exception exception)
+        {
+            // Сбой журналирования не должен ломать вход. Токен всё равно будет выдан,
+            // а пропущенную запись можно увидеть по Warning в журнале приложения.
+            logger.LogWarning(
+                exception,
+                "Не удалось записать приложение {ClientId} в сеанс {SessionId}.",
+                clientId,
+                sessionId);
+        }
+    }
+
+    private Guid? ReadSessionId()
+    {
+        var value = User.FindFirstValue(OpenIddictSecurityClaimTypes.SessionId);
+        return Guid.TryParse(value, out var sessionId) ? sessionId : null;
+    }
+
+    private async Task RevokeCurrentSessionAsync(string reason)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue(Claims.Subject);
+        var sessionId = ReadSessionId();
+
+        if (string.IsNullOrWhiteSpace(userId) || sessionId is null)
+        {
+            return;
+        }
+
+        await userSecurityService.RevokeSessionAsync(userId, sessionId.Value, userId, reason);
     }
 
     /// <summary>
     /// Собирает набор claim пользователя для выдачи токена.
     /// </summary>
-    /// <remarks>
-    /// Claim — это пара «тип-значение» внутри токена. Клиент читает их из
-    /// identity-токена и из /connect/userinfo. Набор ограничен областью запроса:
-    /// без области email адрес почты в токен не попадёт.
-    /// </remarks>
-    private async Task<ClaimsPrincipal> CreatePrincipalAsync(ApplicationUser user, IEnumerable<string> scopes)
+    private async Task<ClaimsPrincipal> CreatePrincipalAsync(
+        ApplicationUser user,
+        IEnumerable<string> scopes,
+        Guid sessionId)
     {
         var identity = new ClaimsIdentity(
             authenticationType: TokenValidationParameters.DefaultAuthenticationType,
             nameType: Claims.Name,
             roleType: Claims.Role);
 
-        // sub — постоянный идентификатор пользователя, name — отображаемое имя.
         identity.SetClaim(Claims.Subject, await userManager.GetUserIdAsync(user));
         identity.SetClaim(Claims.Name, await userManager.GetUserNameAsync(user));
+
+        // sid связывает токен с записью сеанса. По нему можно отозвать конкретный
+        // вход и в будущем реализовать back-channel logout.
+        identity.SetClaim(OpenIddictSecurityClaimTypes.SessionId, sessionId.ToString());
 
         var email = await userManager.GetEmailAsync(user);
         if (!string.IsNullOrEmpty(email))
@@ -183,17 +283,12 @@ public sealed class AuthorizationController(
             identity.SetClaim(Claims.Email, email);
         }
 
-        // Роли нужны клиенту для проверки прав без обращения к Identity.
         var roles = await userManager.GetRolesAsync(user);
         identity.SetClaims(Claims.Role, [.. roles]);
 
         var grantedScopes = scopes.ToList();
         identity.SetScopes(grantedScopes);
 
-        // Ресурс devhome.api делает токен «адресованным» API DevHome:
-        // без него API отклонит токен как выданный для другого ресурса.
-        // devhome-api добавлен в аудиторию, чтобы клиент API мог проверять
-        // этот токен через introspection.
         if (grantedScopes.Contains(DevHomeScopes.Api, StringComparer.Ordinal))
         {
             identity.SetResources(DevHomeScopes.Api, DevHomeClients.Api);
@@ -207,14 +302,10 @@ public sealed class AuthorizationController(
     /// <summary>
     /// Определяет, в какие токены попадёт claim.
     /// </summary>
-    /// <remarks>
-    /// <see cref="Destinations.IdentityToken"/> — токен идентификации: его читает клиент,
-    /// <see cref="Destinations.AccessToken"/> — токен доступа: его читает API.
-    /// Пользовательские данные кладутся в оба, чтобы клиенту не требовался лишний запрос.
-    /// </remarks>
     private static IEnumerable<string> GetDestinations(Claim claim) => claim.Type switch
     {
-        Claims.Subject or Claims.Name or Claims.Email or Claims.Role =>
+        Claims.Subject or Claims.Name or Claims.Email or Claims.Role
+            or OpenIddictSecurityClaimTypes.SessionId =>
             [Destinations.AccessToken, Destinations.IdentityToken],
 
         _ => [Destinations.AccessToken]

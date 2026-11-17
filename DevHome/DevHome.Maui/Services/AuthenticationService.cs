@@ -1,80 +1,52 @@
-using System.Net.Http;
 using System.Security.Claims;
-using IdentityModel.OidcClient;
+using Common.Security.OpenIddict.Client;
 
 namespace DevHome.Maui.Services;
 
 /// <summary>
 /// Выполняет вход через DevHome.Identity и хранит профиль пользователя.
 /// </summary>
+/// <remarks>
+/// Вся работа с OIDC вынесена в <see cref="OpenIddictNativeClient"/>.
+/// </remarks>
 public sealed class AuthenticationService
 {
-    private readonly OidcSettings _settings;
-    private OidcClient? _client;
+    private readonly OpenIddictNativeClient _client;
 
-    public AuthenticationService(OidcSettings settings) => _settings = settings;
-
-    public ClaimsPrincipal? User { get; private set; }
-
-    public string? AccessToken { get; private set; }
-
-    public DateTimeOffset? AccessTokenExpiration { get; private set; }
-
-    public string? Error { get; private set; }
-
-    public bool IsSignedIn => User is not null;
-
-    public async Task<bool> LoginAsync()
+    public AuthenticationService(OidcSettings settings)
     {
-        Error = null;
+        var allowHttp = settings.Authority.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
 
-        try
-        {
-            var result = await GetClient().LoginAsync(new LoginRequest());
-            if (result.IsError)
-            {
-                Error = result.Error;
-                return false;
-            }
-
-            User = result.User;
-            AccessToken = result.AccessToken;
-            AccessTokenExpiration = result.AccessTokenExpiration;
-
-            return true;
-        }
-        catch (Exception exception)
-        {
-            Error = exception.Message;
-            return false;
-        }
-    }
-
-    public void Logout()
-    {
-        User = null;
-        AccessToken = null;
-        AccessTokenExpiration = null;
-        Error = null;
-    }
-
-    private OidcClient GetClient() => _client ??= new OidcClient(new OidcClientOptions
-    {
-        Authority = _settings.Authority,
-        ClientId = _settings.ClientId,
-        RedirectUri = _settings.RedirectUri,
-        Scope = _settings.Scope,
-        Browser = new SystemBrowser(),
 #if DEBUG
-        // В отладке разрешаем самоподписанный сертификат локального Identity.
-        BackchannelHandler = new HttpClientHandler
-        {
-            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        },
+        // В отладке локальный Identity использует самоподписанный сертификат.
+        const bool acceptAnyServerCertificate = true;
+#else
+        var acceptAnyServerCertificate = allowHttp;
 #endif
-        Policy =
+
+        _client = new OpenIddictNativeClient(new OpenIddictNativeClientOptions
         {
-            Discovery = { RequireHttps = false }
-        }
-    });
+            Authority = settings.Authority,
+            ClientId = settings.ClientId,
+            RedirectUri = settings.RedirectUri,
+            Scope = settings.Scope,
+            Browser = new SystemBrowser(),
+            AllowHttp = allowHttp,
+            AcceptAnyServerCertificate = acceptAnyServerCertificate
+        });
+    }
+
+    public ClaimsPrincipal? User => _client.User;
+
+    public string? AccessToken => _client.AccessToken;
+
+    public DateTimeOffset? AccessTokenExpiration => _client.AccessTokenExpiration;
+
+    public string? Error => _client.Error;
+
+    public bool IsSignedIn => _client.IsSignedIn;
+
+    public Task<bool> LoginAsync() => _client.LoginAsync();
+
+    public void Logout() => _client.Logout();
 }

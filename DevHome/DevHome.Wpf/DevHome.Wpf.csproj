@@ -11,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="IdentityModel.OidcClient" />
+    <ProjectReference Include="..\..\Common.Security.OpenIddict.Client\Common.Security.OpenIddict.Client.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.WPF" />
   </ItemGroup>
 

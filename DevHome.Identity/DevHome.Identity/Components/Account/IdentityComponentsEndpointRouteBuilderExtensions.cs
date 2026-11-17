@@ -1,6 +1,7 @@
 using DevHome.Identity.Components.Account.Pages;
 using DevHome.Identity.Components.Account.Pages.Manage;
 using DevHome.Identity.DataContext.Models;
+using Common.Security.OpenIddict.Server.Security;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -44,8 +45,22 @@ namespace Microsoft.AspNetCore.Routing
             accountGroup.MapPost("/Logout", async (
                 ClaimsPrincipal user,
                 [FromServices] SignInManager<ApplicationUser> signInManager,
+                [FromServices] UserManager<ApplicationUser> userManager,
+                [FromServices] IUserSecurityService userSecurityService,
                 [FromForm] string returnUrl) =>
             {
+                var userId = userManager.GetUserId(user);
+                var sessionId = user.FindFirstValue(OpenIddictSecurityClaimTypes.SessionId);
+
+                if (userId is not null && Guid.TryParse(sessionId, out var parsedSessionId))
+                {
+                    await userSecurityService.RevokeSessionAsync(
+                        userId,
+                        parsedSessionId,
+                        userId,
+                        "Пользователь вышел из личного кабинета.");
+                }
+
                 await signInManager.SignOutAsync();
                 return TypedResults.LocalRedirect($"~/{returnUrl}");
             });

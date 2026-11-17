@@ -1,0 +1,527 @@
+@page "/Account/Manage/Sessions"
+@attribute [MenuItem("Устройства и сеансы", Description = "Где и когда выполнен вход, отзыв сеансов и блокировка устройств", Section = "Аккаунт", Icon = "bi bi-laptop", RequiresAuthorization = true, Order = 520)]
+@rendermode InteractiveServer
+
+@using System.Globalization
+@using System.Security.Claims
+@using Common.Security.OpenIddict.Server.Security
+
+@inject IUserSecurityService SecurityService
+@inject NavigationManager Navigation
+@inject ILogger<Sessions> Logger
+
+<PageTitle>Устройства и сеансы</PageTitle>
+
+<h2 class="h4 mb-3">Устройства и сеансы</h2>
+
+@if (message is not null)
+{
+    <div class="alert @(isError ? "alert-danger" : "alert-success") alert-dismissible" role="alert">
+        @message
+    </div>
+}
+
+<div class="alert alert-info" role="status">
+    <div class="fw-semibold mb-1">Как это работает</div>
+    <p class="mb-1 small">
+        При входе сохраняются время, IP-адрес, браузер, операционная система, устройство и приложение.
+        Один и тот же браузер на одном компьютере считается одним устройством: его узнают по
+        постоянной cookie. Если очистить cookie браузера или войти в другом браузере, появится
+        новое устройство.
+    </p>
+    <p class="mb-0 small">
+        Если вы видите незнакомый сеанс, завершите его и заблокируйте устройство. После блокировки
+        вход с него запрещён, а все его сеансы отзываются. Старые сеансы после разблокировки
+        не восстанавливаются.
+    </p>
+</div>
+
+<div class="row g-4">
+    <div class="col-xl-7">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Политика входа с устройств</span>
+                <span class="badge text-bg-secondary">@DescribePolicy(policy)</span>
+            </div>
+            <div class="card-body">
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="radio" name="device-policy" id="policy-multiple"
+                           checked="@(policy == DeviceLoginPolicy.MultipleDevices)"
+                           @onchange="() => policy = DeviceLoginPolicy.MultipleDevices" />
+                    <label class="form-check-label" for="policy-multiple">
+                        <strong>Разрешить вход с нескольких устройств</strong>
+                        <span class="d-block small text-body-secondary">
+                            Можно одновременно работать с компьютера, телефона и планшета.
+                            Подходит, если у вас несколько личных устройств.
+                        </span>
+                    </label>
+                </div>
+
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="radio" name="device-policy" id="policy-newest"
+                           checked="@(policy == DeviceLoginPolicy.SingleDeviceNewestWins)"
+                           @onchange="() => policy = DeviceLoginPolicy.SingleDeviceNewestWins" />
+                    <label class="form-check-label" for="policy-newest">
+                        <strong>Только одно устройство: новый вход побеждает</strong>
+                        <span class="d-block small text-body-secondary">
+                            При входе с нового устройства все предыдущие сеансы завершаются
+                            автоматически. Удобно, но старый браузер может не успеть показать
+                            предупреждение.
+                        </span>
+                    </label>
+                </div>
+
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="radio" name="device-policy" id="policy-confirm"
+                           checked="@(policy == DeviceLoginPolicy.SingleDeviceRequiresOldSessionEnd)"
+                           @onchange="() => policy = DeviceLoginPolicy.SingleDeviceRequiresOldSessionEnd" />
+                    <label class="form-check-label" for="policy-confirm">
+                        <strong>Только одно устройство: сначала завершите старый сеанс</strong>
+                        <span class="d-block small text-body-secondary">
+                            Вход с другого устройства блокируется, пока вы не завершите активный
+                            сеанс на старом устройстве или пока это не сделает администратор.
+                            Это самый строгий режим: если старое устройство потеряно, понадобится
+                            помощь администратора.
+                        </span>
+                    </label>
+                </div>
+
+                <button type="button" class="btn btn-primary" disabled="@isBusy" @onclick="SavePolicyAsync">
+                    <i class="bi bi-check2 me-1" aria-hidden="true"></i>Сохранить политику
+                </button>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-semibold">Действующие сеансы</span>
+                <span class="badge text-bg-light border">@activeSessions.Count</span>
+            </div>
+            @if (activeSessions.Count == 0)
+            {
+                <div class="card-body text-body-secondary">Действующих сеансов нет.</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th scope="col">Устройство</th>
+                                <th scope="col">Приложение</th>
+                                <th scope="col">Где</th>
+                                <th scope="col">Когда</th>
+                                <th scope="col" class="text-end">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var session in activeSessions)
+                            {
+                                var isCurrent = session.Id == currentSessionId;
+                                <tr class="@(isCurrent ? "table-primary" : null)">
+                                    <td>
+                                        <div class="fw-semibold">
+                                            @session.DeviceName
+                                            @if (isCurrent)
+                                            {
+                                                <span class="badge text-bg-primary ms-1">этот сеанс</span>
+                                            }
+                                        </div>
+                                        <div class="small text-body-secondary">
+                                            @session.Browser · @session.OperatingSystem
+                                            @if (!string.IsNullOrWhiteSpace(session.DeviceType))
+                                            {
+                                                <span> · @session.DeviceType</span>
+                                            }
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div>@(session.ApplicationName ?? session.ClientId)</div>
+                                        @if (session.Applications.Count > 1)
+                                        {
+                                            <div class="small text-body-secondary">
+                                                также: @string.Join(", ", session.Applications.Skip(1).Select(app => app.ApplicationName ?? app.ClientId))
+                                            </div>
+                                        }
+                                    </td>
+                                    <td class="small">
+                                        <div class="text-break">@(session.IpAddress ?? "IP неизвестен")</div>
+                                        <div class="text-body-secondary">@(session.Location ?? "локация не определена")</div>
+                                    </td>
+                                    <td class="small">
+                                        <div>вход: @FormatDate(session.CreatedAt)</div>
+                                        <div class="text-body-secondary">активность: @FormatDate(session.LastSeenAt)</div>
+                                    </td>
+                                    <td class="text-end">
+                                        <div class="d-flex flex-column gap-1 align-items-end">
+                                            <button type="button" class="btn btn-sm btn-outline-danger" disabled="@isBusy"
+                                                    @onclick="() => RevokeSessionAsync(session)">
+                                                <i class="bi bi-box-arrow-right me-1" aria-hidden="true"></i>Завершить
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-outline-warning" disabled="@isBusy"
+                                                    @onclick="() => BlockDeviceAsync(session.DeviceId)">
+                                                <i class="bi bi-slash-circle me-1" aria-hidden="true"></i>Заблокировать устройство
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+
+        <div class="card">
+            <div class="card-header fw-semibold">Устройства</div>
+            @if (devices.Count == 0)
+            {
+                <div class="card-body text-body-secondary">Устройства появятся после первого входа.</div>
+            }
+            else
+            {
+                <ul class="list-group list-group-flush">
+                    @foreach (var device in devices)
+                    {
+                        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                            <div class="min-w-0">
+                                <div class="fw-semibold text-truncate">
+                                    @device.DisplayName
+                                    @if (device.IsBlocked)
+                                    {
+                                        <span class="badge text-bg-danger ms-1">заблокировано</span>
+                                    }
+                                </div>
+                                <div class="small text-body-secondary">
+                                    последний вход: @FormatDate(device.LastSeenAt) · @(device.LastIpAddress ?? "IP неизвестен")
+                                    @if (!string.IsNullOrWhiteSpace(device.LastLocation))
+                                    {
+                                        <span> · @device.LastLocation</span>
+                                    }
+                                </div>
+                                @if (device.IsBlocked && !string.IsNullOrWhiteSpace(device.BlockReason))
+                                {
+                                    <div class="small text-danger">@device.BlockReason</div>
+                                }
+                            </div>
+                            <div class="d-flex gap-2">
+                                <span class="badge text-bg-light border align-self-center">
+                                    сеансов: @device.ActiveSessionCount
+                                </span>
+                                @if (device.IsBlocked)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-success" disabled="@isBusy"
+                                            @onclick="() => UnblockDeviceAsync(device.Id)">
+                                        <i class="bi bi-unlock me-1" aria-hidden="true"></i>Разблокировать
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-warning" disabled="@isBusy"
+                                            @onclick="() => BlockDeviceAsync(device.Id)">
+                                        <i class="bi bi-lock me-1" aria-hidden="true"></i>Заблокировать
+                                    </button>
+                                }
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+
+    <div class="col-xl-5">
+        <div class="card mb-4">
+            <div class="card-header fw-semibold">Журнал входов</div>
+            @if (audit.Count == 0)
+            {
+                <div class="card-body text-body-secondary">Событий пока нет.</div>
+            }
+            else
+            {
+                <div class="list-group list-group-flush">
+                    @foreach (var item in audit)
+                    {
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between gap-2">
+                                <span class="fw-semibold small">@DescribeEvent(item.EventType)</span>
+                                <span class="small text-body-secondary text-nowrap">@FormatDate(item.OccurredAt)</span>
+                            </div>
+                            <div class="small text-body-secondary text-break">
+                                @if (!string.IsNullOrWhiteSpace(item.ApplicationName) || !string.IsNullOrWhiteSpace(item.ClientId))
+                                {
+                                    <span>@(item.ApplicationName ?? item.ClientId)</span>
+                                    <span> · </span>
+                                }
+                                <span>@(item.DeviceName ?? "устройство неизвестно")</span>
+                                @if (!string.IsNullOrWhiteSpace(item.IpAddress))
+                                {
+                                    <span> · @item.IpAddress</span>
+                                }
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(item.Details))
+                            {
+                                <div class="small text-body-secondary text-break">@item.Details</div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="card">
+            <div class="card-header fw-semibold">История сеансов</div>
+            @if (history.Count == 0)
+            {
+                <div class="card-body text-body-secondary">История пуста.</div>
+            }
+            else
+            {
+                <div class="list-group list-group-flush">
+                    @foreach (var session in history.Take(10))
+                    {
+                        <div class="list-group-item small">
+                            <div class="d-flex justify-content-between gap-2">
+                                <span class="fw-semibold">@session.DeviceName</span>
+                                <span class="text-body-secondary text-nowrap">@FormatDate(session.CreatedAt)</span>
+                            </div>
+                            <div class="text-body-secondary">
+                                @(session.ApplicationName ?? session.ClientId)
+                                @if (!session.IsActive)
+                                {
+                                    <span> · завершён</span>
+                                }
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(session.RevokeReason))
+                            {
+                                <div class="text-body-secondary">@session.RevokeReason</div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string? message;
+    private bool isError;
+    private bool isBusy;
+    private string? userId;
+    private Guid? currentSessionId;
+    private DeviceLoginPolicy policy = DeviceLoginPolicy.MultipleDevices;
+    private List<SessionSummary> activeSessions = [];
+    private List<SessionSummary> history = [];
+    private List<DeviceSummary> devices = [];
+    private List<LoginAuditSummary> audit = [];
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthenticationStateTask is null)
+        {
+            return;
+        }
+
+        var state = await AuthenticationStateTask;
+        userId = state.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        currentSessionId = Guid.TryParse(
+            state.User.FindFirstValue(OpenIddictSecurityClaimTypes.SessionId),
+            out var parsedSessionId)
+            ? parsedSessionId
+            : null;
+
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return;
+        }
+
+        var settings = await SecurityService.GetSettingsAsync(userId);
+        policy = settings.DevicePolicy;
+        activeSessions = [.. await SecurityService.GetActiveSessionsAsync(userId)];
+        history = [.. await SecurityService.GetSessionHistoryAsync(userId, 20)];
+        devices = [.. await SecurityService.GetDevicesAsync(userId)];
+        audit = [.. await SecurityService.GetAuditAsync(userId, 30)];
+    }
+
+    private async Task SavePolicyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await SecurityService.SetPolicyAsync(userId, policy, userId);
+            await LoadAsync();
+            SetSuccess("Политика входа сохранена.");
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось сохранить политику устройств.");
+            SetError("Не удалось сохранить политику: " + exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task RevokeSessionAsync(SessionSummary session)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await SecurityService.RevokeSessionAsync(
+                userId,
+                session.Id,
+                userId,
+                "Пользователь завершил сеанс в личном кабинете.");
+
+            if (session.Id == currentSessionId)
+            {
+                // Сеанс уже отозван в базе. Достаточно перейти на страницу входа:
+                // проверка cookie отклонит её на следующем запросе.
+                Navigation.NavigateTo("/Account/Login", forceLoad: true);
+                return;
+            }
+
+            await LoadAsync();
+            SetSuccess("Сеанс завершён. Его токены отозваны.");
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось завершить сеанс {SessionId}.", session.Id);
+            SetError("Не удалось завершить сеанс: " + exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task BlockDeviceAsync(Guid deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await SecurityService.BlockDeviceAsync(
+                userId,
+                deviceId,
+                userId,
+                "Пользователь заблокировал устройство в личном кабинете.");
+
+            var device = devices.FirstOrDefault(item => item.Id == deviceId);
+            if (device is not null && device.ActiveSessionCount > 0 && device.Id == currentDeviceId())
+            {
+                Navigation.NavigateTo("/Account/Login", forceLoad: true);
+                return;
+            }
+
+            await LoadAsync();
+            SetSuccess("Устройство заблокировано, его сеансы и токены отозваны.");
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось заблокировать устройство {DeviceId}.", deviceId);
+            SetError("Не удалось заблокировать устройство: " + exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task UnblockDeviceAsync(Guid deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await SecurityService.UnblockDeviceAsync(userId, deviceId, userId);
+            await LoadAsync();
+            SetSuccess("Устройство разблокировано. Старые сеансы не восстановлены.");
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось разблокировать устройство {DeviceId}.", deviceId);
+            SetError("Не удалось разблокировать устройство: " + exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private Guid? currentDeviceId()
+    {
+        var current = activeSessions.FirstOrDefault(session => session.Id == currentSessionId);
+        return current?.DeviceId;
+    }
+
+    private void SetSuccess(string text)
+    {
+        message = text;
+        isError = false;
+    }
+
+    private void SetError(string text)
+    {
+        message = text;
+        isError = true;
+    }
+
+    private static string DescribePolicy(DeviceLoginPolicy value) => value switch
+    {
+        DeviceLoginPolicy.MultipleDevices => "несколько устройств",
+        DeviceLoginPolicy.SingleDeviceNewestWins => "одно устройство: новый вход побеждает",
+        DeviceLoginPolicy.SingleDeviceRequiresOldSessionEnd => "одно устройство: завершить старый сеанс",
+        _ => value.ToString()
+    };
+
+    private static string DescribeEvent(string eventType) => eventType switch
+    {
+        UserSecurityEventTypes.SignIn => "Вход",
+        UserSecurityEventTypes.SignInRejected => "Вход отклонён",
+        UserSecurityEventTypes.SignOut => "Выход",
+        UserSecurityEventTypes.ApplicationAuthorized => "Вход в приложение",
+        UserSecurityEventTypes.SessionRevoked => "Сеанс завершён",
+        UserSecurityEventTypes.AllSessionsRevoked => "Все сеансы завершены",
+        UserSecurityEventTypes.DeviceBlocked => "Устройство заблокировано",
+        UserSecurityEventTypes.DeviceUnblocked => "Устройство разблокировано",
+        UserSecurityEventTypes.PolicyChanged => "Политика изменена",
+        _ => eventType
+    };
+
+    private static string FormatDate(DateTimeOffset value) =>
+        value.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
+}

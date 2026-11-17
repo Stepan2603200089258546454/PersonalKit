@@ -1,4 +1,4 @@
-﻿@page "/admin/users"
+@page "/admin/users"
 @attribute [Authorize(Roles = AdminRoles.Administrator)]
 @attribute [MenuItem("Пользователи", Description = "Учётные записи, роли и доступ", Section = AdminNavigation.Section, Icon = "bi bi-people", Roles = AdminRoles.Administrator, Order = 610)]
 @rendermode InteractiveServer
@@ -23,6 +23,21 @@
     <a class="btn btn-primary" href="@AdminNavigation.NewUser">
         <i class="bi bi-person-plus me-1" aria-hidden="true"></i>Создать пользователя
     </a>
+</div>
+
+<div class="alert alert-info" role="status">
+    <div class="fw-semibold mb-1">Что означают столбцы</div>
+    <p class="mb-1 small">
+        <strong>Почта</strong> — подтверждена ли учётная запись. <strong>2FA</strong> — включена ли
+        двухфакторная аутентификация. <strong>Доступ</strong> — не заблокирована ли учётная запись
+        администратором. Блокировка учётной записи и блокировка отдельного устройства — разные вещи:
+        первая запрещает вход везде, вторая — только с конкретного браузера.
+    </p>
+    <p class="mb-0 small">
+        В карточке пользователя можно завершить отдельные сеансы, заблокировать устройство и изменить
+        политику одновременного входа. Общий список действующих сеансов —
+        <a href="@AdminNavigation.Sessions">«Сеансы и устройства»</a>.
+    </p>
 </div>
 
 <div class="card mb-3">

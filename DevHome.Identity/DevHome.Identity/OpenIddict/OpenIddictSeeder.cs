@@ -1,3 +1,4 @@
+using Common.Security.OpenIddict.Server;
 using DevHome.Identity.Administration;
 using DevHome.Identity.DataContext.Models;
 using Microsoft.AspNetCore.Identity;
@@ -67,17 +68,7 @@ public static class OpenIddictSeeder
 
         var refresh = configuration.GetValue("OpenIddict:Seed:RefreshClients", false);
 
-        if (await manager.FindByNameAsync(DevHomeScopes.Api) is { } existing)
-        {
-            if (refresh)
-            {
-                await manager.UpdateAsync(existing, descriptor);
-            }
-
-            return;
-        }
-
-        await manager.CreateAsync(descriptor);
+        await OpenIddictServerDataSeeder.EnsureScopeAsync(manager, descriptor, refresh);
     }
 
     private static Task EnsureMauiClientAsync(IOpenIddictApplicationManager manager) =>
@@ -100,12 +91,7 @@ public static class OpenIddictSeeder
         string displayName,
         Uri redirectUri)
     {
-        if (await manager.FindByClientIdAsync(clientId) is not null)
-        {
-            return;
-        }
-
-        await manager.CreateAsync(new OpenIddictApplicationDescriptor
+        var descriptor = new OpenIddictApplicationDescriptor
         {
             ClientId = clientId,
             // Публичный клиент: настольное приложение не может хранить секрет,
@@ -135,17 +121,14 @@ public static class OpenIddictSeeder
             {
                 Requirements.Features.ProofKeyForCodeExchange
             }
-        });
+        };
+
+        await OpenIddictServerDataSeeder.EnsureApplicationAsync(manager, descriptor, refresh: false);
     }
 
     private static async Task EnsureCliClientAsync(IOpenIddictApplicationManager manager)
     {
-        if (await manager.FindByClientIdAsync(DevHomeClients.Cli) is not null)
-        {
-            return;
-        }
-
-        await manager.CreateAsync(new OpenIddictApplicationDescriptor
+        var descriptor = new OpenIddictApplicationDescriptor
         {
             ClientId = DevHomeClients.Cli,
             ClientType = ClientTypes.Public,
@@ -162,7 +145,9 @@ public static class OpenIddictSeeder
                 Permissions.Scopes.Email,
                 Permissions.Prefixes.Scope + DevHomeScopes.Api
             }
-        });
+        };
+
+        await OpenIddictServerDataSeeder.EnsureApplicationAsync(manager, descriptor, refresh: false);
     }
 
     private static async Task EnsureWebClientAsync(
@@ -212,22 +197,12 @@ public static class OpenIddictSeeder
         AddRedirectUris(descriptor.PostLogoutRedirectUris, new Uri("http://localhost:5149/signout-callback-oidc"));
         AddRedirectUris(descriptor.PostLogoutRedirectUris, new Uri("http://127.0.0.1:5149/signout-callback-oidc"));
 
-        var refresh = configuration.GetValue("OpenIddict:Seed:RefreshClients", false);
+        // В разработке и в Docker обновляем существующего клиента, а не удаляем:
+        // так не теряются выданные ранее согласия и токены.
+        var refresh = environment.IsDevelopment()
+            || configuration.GetValue("OpenIddict:Seed:RefreshClients", false);
 
-        if (await manager.FindByClientIdAsync(DevHomeClients.Web) is { } existing)
-        {
-            if (!environment.IsDevelopment() && !refresh)
-            {
-                return;
-            }
-
-            // В разработке и в Docker обновляем существующего клиента,
-            // а не удаляем: так не теряются выданные ранее согласия и токены.
-            await manager.UpdateAsync(existing, descriptor);
-            return;
-        }
-
-        await manager.CreateAsync(descriptor);
+        await OpenIddictServerDataSeeder.EnsureApplicationAsync(manager, descriptor, refresh);
     }
 
     private static async Task EnsureServiceClientAsync(
@@ -257,18 +232,7 @@ public static class OpenIddictSeeder
         };
 
         var refresh = configuration.GetValue("OpenIddict:Seed:RefreshClients", false);
-
-        if (await manager.FindByClientIdAsync(DevHomeClients.Service) is { } existing)
-        {
-            if (refresh)
-            {
-                await manager.UpdateAsync(existing, descriptor);
-            }
-
-            return;
-        }
-
-        await manager.CreateAsync(descriptor);
+        await OpenIddictServerDataSeeder.EnsureApplicationAsync(manager, descriptor, refresh);
     }
 
     /// <summary>
@@ -302,18 +266,7 @@ public static class OpenIddictSeeder
         };
 
         var refresh = configuration.GetValue("OpenIddict:Seed:RefreshClients", false);
-
-        if (await manager.FindByClientIdAsync(DevHomeClients.Api) is { } existing)
-        {
-            if (refresh)
-            {
-                await manager.UpdateAsync(existing, descriptor);
-            }
-
-            return;
-        }
-
-        await manager.CreateAsync(descriptor);
+        await OpenIddictServerDataSeeder.EnsureApplicationAsync(manager, descriptor, refresh);
     }
 
     private static string ResolveClientSecret(

@@ -11,9 +11,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Common.Security.OpenIddict.Client.Web\Common.Security.OpenIddict.Client.Web.csproj" />
     <ProjectReference Include="..\..\Common.UI\Common.UI.csproj" />
     <ProjectReference Include="..\DevHome.Client\DevHome.Client.csproj" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" />
   </ItemGroup>

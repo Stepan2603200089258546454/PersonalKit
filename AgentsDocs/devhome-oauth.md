@@ -3,6 +3,9 @@
 `DevHome.Identity` работает как обычный OAuth 2.0/OpenID Connect-провайдер: так же, как Google выдаёт токены сторонним сервисам, DevHome.Identity выдаёт токены приложениям DevHome. Вход пользователя выполняется на страницах Identity, а клиент получает access-токен и профиль.
 
 Разбор настроек OpenIddict «что за что отвечает»: [openiddict-reference.md](openiddict-reference.md).
+Клиентская библиотека для настольных приложений и CLI: `../Common.Security.OpenIddict.Client/README.md`.
+Веб-клиент и API: `../Common.Security.OpenIddict.Client.Web/README.md`.
+Устройства и сеансы: [security-sessions.md](security-sessions.md).
 
 ## Что поддерживается
 
@@ -36,7 +39,7 @@
    dotnet run --project DevHome.Identity/DevHome.Identity
    ```
 
-   При старте применяются миграции (`InitialCreate`), создаются области, клиенты и (в Development) демо-учётная запись.
+   При старте применяются миграции (`InitialCreate`, `AddDeviceSecurity`), создаются области, клиенты и (в Development) демо-учётная запись.
 
 3. Демо-учётная запись: `demo@devhome.local` / `DevHome!2026`.
 
@@ -44,7 +47,7 @@
 
 ## Клиенты
 
-Все клиенты уже зарегистрированы сидером (`OpenIddictSeeder`), повторный запуск не создаёт дубликатов. В Development и при `OpenIddict:Seed:RefreshClients=true` веб-клиент обновляется, чтобы применить адреса возврата.
+Все клиенты уже зарегистрированы сидером (`OpenIddictSeeder`), повторный запуск не создаёт дубликатов. В Development и при `OpenIddict:Seed:RefreshClients=true` веб-клиент обновляется, чтобы применить адреса возврата. Создание и обновление выполняет `OpenIddictServerDataSeeder` из серверной библиотеки; описания клиентов остаются в приложении.
 
 | Клиент | Redirect URI | Секрет |
 |---|---|---|
@@ -101,6 +104,10 @@ dotnet run --project DevHome.Identity/DevHome.Identity --no-launch-profile
 ## Безопасность
 
 - Публичные клиенты обязаны использовать PKCE; сервер требует `code_challenge`.
+- В access- и identity-токены попадает `sid` — идентификатор сеанса Identity. По нему
+  можно связать токен с записью `UserSession` и отозвать конкретный вход.
+- Отзыв сеанса в Identity отзывает токены приложений. Клиентское приложение узнает
+  об этом при следующем обращении к API; принудительный back-channel logout не реализован.
 - Consent для демонстрационных клиентов установлен в `implicit` (без экрана согласия). Для реальных приложений включите явное согласие.
 - В Development разрешён HTTP. В промышленной среде оставьте только HTTPS и постоянные ключи.
 - Секреты веб- и сервисного клиентов не храните в репозитории: используйте user-secrets/переменные окружения.

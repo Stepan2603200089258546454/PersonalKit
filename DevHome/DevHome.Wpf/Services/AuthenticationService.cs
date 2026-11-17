@@ -1,85 +1,57 @@
-using System.Net.Http;
 using System.Security.Claims;
-using IdentityModel.OidcClient;
+using Common.Security.OpenIddict.Client;
 
 namespace DevHome.Wpf.Services;
 
 /// <summary>
 /// Выполняет вход через DevHome.Identity и хранит профиль пользователя.
 /// </summary>
+/// <remarks>
+/// Вся работа с OIDC вынесена в <see cref="OpenIddictNativeClient"/>.
+/// Приложение передаёт только адрес Identity, ClientId и платформенный браузер.
+/// </remarks>
 public sealed class AuthenticationService
 {
-    private readonly OidcSettings _settings;
-    private OidcClient? _client;
+    private readonly OpenIddictNativeClient _client;
 
-    public AuthenticationService(OidcSettings settings) => _settings = settings;
+    public AuthenticationService(OidcSettings settings)
+    {
+        var allowHttp = settings.Authority.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
+
+#if DEBUG
+        // В отладке локальный Identity использует самоподписанный сертификат.
+        const bool acceptAnyServerCertificate = true;
+#else
+        var acceptAnyServerCertificate = allowHttp;
+#endif
+
+        _client = new OpenIddictNativeClient(new OpenIddictNativeClientOptions
+        {
+            Authority = settings.Authority,
+            ClientId = settings.ClientId,
+            RedirectUri = settings.RedirectUri,
+            Scope = settings.Scope,
+            Browser = new SystemBrowser(),
+            AllowHttp = allowHttp,
+            AcceptAnyServerCertificate = acceptAnyServerCertificate
+        });
+    }
 
     /// <summary>Профиль вошедшего пользователя.</summary>
-    public ClaimsPrincipal? User { get; private set; }
+    public ClaimsPrincipal? User => _client.User;
 
     /// <summary>Access-токен для вызовов API.</summary>
-    public string? AccessToken { get; private set; }
+    public string? AccessToken => _client.AccessToken;
 
     /// <summary>Срок действия access-токена.</summary>
-    public DateTimeOffset? AccessTokenExpiration { get; private set; }
+    public DateTimeOffset? AccessTokenExpiration => _client.AccessTokenExpiration;
 
     /// <summary>Последняя ошибка входа.</summary>
-    public string? Error { get; private set; }
+    public string? Error => _client.Error;
 
-    public bool IsSignedIn => User is not null;
+    public bool IsSignedIn => _client.IsSignedIn;
 
-    public async Task<bool> LoginAsync()
-    {
-        Error = null;
+    public Task<bool> LoginAsync() => _client.LoginAsync();
 
-        try
-        {
-            var result = await GetClient().LoginAsync(new LoginRequest());
-            if (result.IsError)
-            {
-                Error = result.Error;
-                return false;
-            }
-
-            User = result.User;
-            AccessToken = result.AccessToken;
-            AccessTokenExpiration = result.AccessTokenExpiration;
-
-            return true;
-        }
-        catch (Exception exception)
-        {
-            Error = exception.Message;
-            return false;
-        }
-    }
-
-    public void Logout()
-    {
-        User = null;
-        AccessToken = null;
-        AccessTokenExpiration = null;
-        Error = null;
-    }
-
-    private OidcClient GetClient() => _client ??= new OidcClient(new OidcClientOptions
-    {
-        Authority = _settings.Authority,
-        ClientId = _settings.ClientId,
-        RedirectUri = _settings.RedirectUri,
-        Scope = _settings.Scope,
-        Browser = new SystemBrowser(),
-#if DEBUG
-        // В отладке разрешаем самоподписанный сертификат локального Identity.
-        BackchannelHandler = new HttpClientHandler
-        {
-            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        },
-#endif
-        Policy =
-        {
-            // Локальный сервер разработки может работать по http.
-            Discovery = { RequireHttps = false }
-        }
-    });
+    public void Logout() => _client.Logout();
 }

@@ -1,11 +1,14 @@
-﻿@page "/Account/LoginWithRecoveryCode"
+@page "/Account/LoginWithRecoveryCode"
 
 @using System.ComponentModel.DataAnnotations
+@using Common.Security.OpenIddict.Server.Security
 @using Microsoft.AspNetCore.Identity
 @using DevHome.Identity.DataContext.Models
 
 @inject SignInManager<ApplicationUser> SignInManager
 @inject UserManager<ApplicationUser> UserManager
+@inject IDeviceIdentityService DeviceIdentityService
+@inject IUserSecurityService UserSecurityService
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<LoginWithRecoveryCode> Logger
 
@@ -45,6 +48,9 @@
     [SupplyParameterFromQuery]
     private string? ReturnUrl { get; set; }
 
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
     protected override async Task OnInitializedAsync()
     {
         Input ??= new();
@@ -56,6 +62,13 @@
 
     private async Task OnValidSubmitAsync()
     {
+        var policyError = await CheckDevicePolicyAsync();
+        if (policyError is not null)
+        {
+            message = policyError;
+            return;
+        }
+
         var recoveryCode = Input.RecoveryCode.Replace(" ", string.Empty);
 
         var result = await SignInManager.TwoFactorRecoveryCodeSignInAsync(recoveryCode);
@@ -77,6 +90,20 @@
             Logger.LogWarning("Введён неверный код восстановления для пользователя с идентификатором '{UserId}' ", userId);
             message = "Ошибка: введён неверный код восстановления.";
         }
+    }
+
+    private async Task<string?> CheckDevicePolicyAsync()
+    {
+        var userId = await UserManager.GetUserIdAsync(user);
+        var resolution = await DeviceIdentityService.ResolveAsync(userId, HttpContext);
+
+        if (resolution.IsBlocked)
+        {
+            return "Вход с этого устройства заблокирован. Разблокировать его может пользователь или администратор.";
+        }
+
+        var decision = await UserSecurityService.EvaluateSignInAsync(userId, resolution.Device.Id);
+        return decision.IsAllowed ? null : decision.Message;
     }
 
     private sealed class InputModel

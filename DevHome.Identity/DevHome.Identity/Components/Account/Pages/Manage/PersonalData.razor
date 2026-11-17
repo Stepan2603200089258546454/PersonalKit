@@ -1,12 +1,14 @@
 @page "/Account/Manage/PersonalData"
-@attribute [MenuItem("Личные данные", Description = "Скачивание и удаление данных учётной записи", Section = "Аккаунт", Icon = "bi bi-database-lock", RequiresAuthorization = true, Order = 520)]
+@attribute [MenuItem("Личные данные", Description = "Скачивание и удаление данных учётной записи", Section = "Аккаунт", Icon = "bi bi-database-lock", RequiresAuthorization = true, Order = 530)]
 
 @using System.ComponentModel.DataAnnotations
+@using Common.Security.OpenIddict.Server.Security
 @using Microsoft.AspNetCore.Identity
 @using DevHome.Identity.DataContext.Models
 
 @inject UserManager<ApplicationUser> UserManager
 @inject SignInManager<ApplicationUser> SignInManager
+@inject IUserSecurityService SecurityService
 @inject IdentityRedirectManager RedirectManager
 @inject NavigationManager NavigationManager
 @inject ILogger<PersonalData> Logger
@@ -136,6 +138,7 @@
                 return;
             }
 
+            await SecurityService.DeleteUserDataAsync(userId);
             await SignInManager.SignOutAsync();
             Logger.LogInformation("Пользователь с идентификатором '{UserId}' удалил свою учётную запись.", userId);
 

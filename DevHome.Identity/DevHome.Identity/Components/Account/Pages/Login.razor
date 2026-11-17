@@ -1,12 +1,15 @@
 @page "/Account/Login"
 
 @using System.ComponentModel.DataAnnotations
+@using Common.Security.OpenIddict.Server.Security
 @using Microsoft.AspNetCore.Authentication
 @using Microsoft.AspNetCore.Identity
 @using DevHome.Identity.DataContext.Models
 
 @inject UserManager<ApplicationUser> UserManager
 @inject SignInManager<ApplicationUser> SignInManager
+@inject IDeviceIdentityService DeviceIdentityService
+@inject IUserSecurityService UserSecurityService
 @inject ILogger<Login> Logger
 @inject NavigationManager NavigationManager
 @inject IdentityRedirectManager RedirectManager
@@ -14,6 +17,11 @@
 <PageTitle>Вход</PageTitle>
 
 <h1>Вход</h1>
+<p class="text-body-secondary small">
+    При входе сохраняются устройство, браузер, IP-адрес, время и приложение, из которого
+    выполнен вход. Это нужно, чтобы вы могли заметить чужой сеанс и завершить его.
+    Один и тот же браузер на одном компьютере считается одним устройством.
+</p>
 <div class="row">
     <div class="col-lg-6">
         <section>
@@ -119,6 +127,22 @@
         SignInResult result;
         if (!string.IsNullOrEmpty(Input.Passkey?.CredentialJson))
         {
+            // Ключ доступа тоже подчиняется политике устройств. Проверяем её
+            // до входа, чтобы не создавать сеанс, который сразу будет отозван.
+            if (!string.IsNullOrWhiteSpace(Input.Email))
+            {
+                var passkeyUser = await UserManager.FindByEmailAsync(Input.Email);
+                if (passkeyUser is not null)
+                {
+                    var passkeyPolicyError = await CheckDevicePolicyAsync(passkeyUser);
+                    if (passkeyPolicyError is not null)
+                    {
+                        errorMessage = passkeyPolicyError;
+                        return;
+                    }
+                }
+            }
+
             // При входе по ключу доступа проверку формы не выполняем.
             result = await SignInManager.PasskeySignInAsync(Input.Passkey.CredentialJson);
         }
@@ -152,6 +176,23 @@
                 return;
             }
 
+            // Проверяем пароль до установки cookie, чтобы при конфликте политики
+            // устройств показать сообщение, а не молча выйти на следующем запросе.
+            var check = await SignInManager.CheckPasswordSignInAsync(
+                user,
+                Input.Password,
+                lockoutOnFailure: false);
+
+            if (check.Succeeded || check.RequiresTwoFactor)
+            {
+                var policyError = await CheckDevicePolicyAsync(user);
+                if (policyError is not null)
+                {
+                    errorMessage = policyError;
+                    return;
+                }
+            }
+
             result = await SignInManager.PasswordSignInAsync(userName, Input.Password, Input.RememberMe, lockoutOnFailure: false);
         }
 
@@ -175,6 +216,21 @@
         {
             errorMessage = "Ошибка: неверная попытка входа.";
         }
+    }
+
+    private async Task<string?> CheckDevicePolicyAsync(ApplicationUser user)
+    {
+        var userId = await UserManager.GetUserIdAsync(user);
+        var resolution = await DeviceIdentityService.ResolveAsync(userId, HttpContext);
+
+        if (resolution.IsBlocked)
+        {
+            return "Вход с этого устройства заблокирован. " +
+                   "Разблокировать его может пользователь в разделе «Безопасность» или администратор.";
+        }
+
+        var decision = await UserSecurityService.EvaluateSignInAsync(userId, resolution.Device.Id);
+        return decision.IsAllowed ? null : decision.Message;
     }
 
     private sealed class InputModel

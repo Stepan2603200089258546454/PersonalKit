@@ -1,15 +1,18 @@
-﻿@page "/Account/ExternalLogin"
+@page "/Account/ExternalLogin"
 
 @using System.ComponentModel.DataAnnotations
 @using System.Security.Claims
 @using System.Text
 @using System.Text.Encodings.Web
+@using Common.Security.OpenIddict.Server.Security
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.AspNetCore.WebUtilities
 @using DevHome.Identity.DataContext.Models
 
 @inject SignInManager<ApplicationUser> SignInManager
 @inject UserManager<ApplicationUser> UserManager
+@inject IDeviceIdentityService DeviceIdentityService
+@inject IUserSecurityService UserSecurityService
 @inject IUserStore<ApplicationUser> UserStore
 @inject IEmailSender<ApplicationUser> EmailSender
 @inject NavigationManager NavigationManager
@@ -119,6 +122,21 @@
         }
 
         // Если у пользователя уже есть вход через этого внешнего поставщика, выполняем вход.
+        // Проверяем политику устройств до установки cookie.
+        var existingUser = await UserManager.FindByLoginAsync(
+            externalLoginInfo.LoginProvider,
+            externalLoginInfo.ProviderKey);
+
+        if (existingUser is not null)
+        {
+            var policyError = await CheckDevicePolicyAsync(existingUser);
+            if (policyError is not null)
+            {
+                message = policyError;
+                return;
+            }
+        }
+
         var result = await SignInManager.ExternalLoginSignInAsync(
             externalLoginInfo.LoginProvider,
             externalLoginInfo.ProviderKey,
@@ -217,6 +235,20 @@
             throw new NotSupportedException("Стандартному интерфейсу требуется хранилище пользователей с поддержкой электронной почты.");
         }
         return (IUserEmailStore<ApplicationUser>)UserStore;
+    }
+
+    private async Task<string?> CheckDevicePolicyAsync(ApplicationUser user)
+    {
+        var userId = await UserManager.GetUserIdAsync(user);
+        var resolution = await DeviceIdentityService.ResolveAsync(userId, HttpContext);
+
+        if (resolution.IsBlocked)
+        {
+            return "Вход с этого устройства заблокирован. Разблокировать его может пользователь или администратор.";
+        }
+
+        var decision = await UserSecurityService.EvaluateSignInAsync(userId, resolution.Device.Id);
+        return decision.IsAllowed ? null : decision.Message;
     }
 
     private sealed class InputModel

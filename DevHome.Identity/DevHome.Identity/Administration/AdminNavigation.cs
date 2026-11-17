@@ -30,6 +30,9 @@ public static class AdminNavigation
     /// <summary>Области OpenIddict.</summary>
     public const string Scopes = "/admin/scopes";
 
+    /// <summary>Все устройства и сеансы пользователей.</summary>
+    public const string Sessions = "/admin/sessions";
+
     /// <summary>Авторизации и токены OpenIddict.</summary>
     public const string Tokens = "/admin/tokens";
 

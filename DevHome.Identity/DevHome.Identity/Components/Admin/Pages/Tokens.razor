@@ -1,6 +1,6 @@
-﻿@page "/admin/tokens"
+@page "/admin/tokens"
 @attribute [Authorize(Roles = AdminRoles.Administrator)]
-@attribute [MenuItem("Токены", Description = "Авторизации и выданные токены", Section = AdminNavigation.Section, Icon = "bi bi-key", Roles = AdminRoles.Administrator, Order = 640)]
+@attribute [MenuItem("Токены", Description = "Авторизации и выданные токены", Section = AdminNavigation.Section, Icon = "bi bi-key", Roles = AdminRoles.Administrator, Order = 650)]
 @rendermode InteractiveServer
 @layout DevHome.Identity.Components.Admin.Shared.AdminLayout
 
@@ -28,6 +28,20 @@
 {
     <div class="alert @(isError ? "alert-danger" : "alert-success")" role="alert">@message</div>
 }
+
+<div class="alert alert-info" role="status">
+    <div class="fw-semibold mb-1">Токены — это технические ключи, а не сеансы</div>
+    <p class="mb-1 small">
+        <strong>Авторизация</strong> — разрешение приложения действовать от имени пользователя.
+        <strong>Токен</strong> — ключ доступа: access-токен живёт час, refresh-токен — две недели.
+        Отзыв токена сразу закрывает доступ к API, но не завершает cookie пользователя в браузере.
+    </p>
+    <p class="mb-0 small">
+        Чтобы завершить именно вход (и связанные токены), используйте
+        <a href="@AdminNavigation.Sessions">«Сеансы и устройства»</a>. «Удалить просроченные»
+        очищает только старые записи и не влияет на действующие сеансы.
+    </p>
+</div>
 
 <ul class="nav nav-tabs mb-3">
     <li class="nav-item">

@@ -1,4 +1,4 @@
-﻿<Solution>
+<Solution>
   <Folder Name="/Applications/" />
   <Folder Name="/Applications/API/">
     <Project Path="DevHome/DevHome.Api/DevHome.Api.csproj" />
@@ -21,6 +21,9 @@
     <Project Path="Common.Helper.DataBase/Common.Helper.DataBase.csproj" Id="17cc7641-7bd0-4822-ba45-42e030c59f81" />
     <Project Path="Common.Helper.Http/Common.Helper.Http.csproj" />
     <Project Path="Common.Helper.Options/Common.Helper.Options.csproj" Id="c5254917-0e76-4d56-82fc-744c4ef6b3aa" />
+    <Project Path="Common.Security.OpenIddict.Client.Web/Common.Security.OpenIddict.Client.Web.csproj" />
+    <Project Path="Common.Security.OpenIddict.Client/Common.Security.OpenIddict.Client.csproj" />
+    <Project Path="Common.Security.OpenIddict.Server/Common.Security.OpenIddict.Server.csproj" />
     <Project Path="Common.UI/Common.UI.csproj" />
   </Folder>
   <Folder Name="/Common/Testing/">
@@ -47,6 +50,7 @@
     <File Path="AgentsDocs/identity-administration.md" />
     <File Path="AgentsDocs/openiddict-reference.md" />
     <File Path="AgentsDocs/README.md" />
+    <File Path="AgentsDocs/security-sessions.md" />
   </Folder>
   <Folder Name="/AgentsTools/">
     <File Path="AgentsTools/README.md" />

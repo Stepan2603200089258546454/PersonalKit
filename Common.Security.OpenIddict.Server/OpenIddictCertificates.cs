@@ -1,79 +1,71 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
-namespace DevHome.Identity.OpenIddict;
+namespace Common.Security.OpenIddict.Server;
 
 /// <summary>
 /// Пара сертификатов, которыми OpenIddict подписывает и шифрует токены.
 /// </summary>
 /// <param name="Signing">Сертификат подписи access- и identity-токенов.</param>
 /// <param name="Encryption">Сертификат шифрования данных, которые не должны читаться клиентом.</param>
-internal sealed record OpenIddictCertificates(
+public sealed record OpenIddictCertificates(
     X509Certificate2 Signing,
     X509Certificate2 Encryption);
 
 /// <summary>
-/// Загружает или создаёт постоянные сертификаты OpenIddict для запуска в контейнере.
+/// Загружает или создаёт постоянные сертификаты OpenIddict.
 /// </summary>
 /// <remarks>
 /// <para>
 /// В разработке OpenIddict использует временные ключи в памяти: после перезапуска
-/// приложения выданные ранее токены становятся недействительными, но это удобно
-/// и не требует сертификатов. В контейнере перезапуск происходит часто (обновление
-/// образа, перезапуск Docker Desktop), поэтому ключи нужно хранить на диске.
+/// приложения выданные ранее токены становятся недействительными. В контейнере
+/// перезапуск происходит часто, поэтому ключи нужно хранить на диске.
 /// </para>
 /// <para>
-/// Каталог задаётся настройкой <c>OpenIddict:Certificates:Directory</c>. В docker-compose
-/// это том <c>identity-data</c>, примонтированный в <c>/app/App_Data</c>. При первом
-/// запуске создаются два самоподписанных сертификата, при следующих — они читаются
-/// с диска. Пароль задаётся <c>OpenIddict:Certificates:Password</c>.
-/// </para>
-/// <para>
-/// Это сертификаты для домашней локальной сети, а не для выхода в интернет:
-/// закрытый ключ лежит в томе Docker, а пароль — в <c>.env</c>. Для публичного
-/// размещения выдавайте сертификаты доверенным центром и не храните пароль рядом.
+/// Каталог задаётся <see cref="OpenIddictServerOptions.CertificatesDirectory"/>.
+/// При первом запуске создаются два самоподписанных сертификата, при следующих —
+/// они читаются с диска. Это сертификаты для домашней локальной сети, а не для
+/// выхода в интернет: закрытый ключ лежит на постоянном томе, пароль — в секретах
+/// приложения. Для публичного размещения выдавайте сертификаты доверенным центром.
 /// </para>
 /// </remarks>
-internal static class OpenIddictCertificateLoader
+public static class OpenIddictCertificateLoader
 {
     private const string SigningFileName = "signing.pfx";
     private const string EncryptionFileName = "encryption.pfx";
 
     /// <summary>
-    /// Возвращает сертификаты, если каталог задан в конфигурации; иначе <c>null</c>.
+    /// Возвращает сертификаты, если каталог задан; иначе <c>null</c>.
     /// </summary>
-    /// <param name="configuration">Конфигурация приложения.</param>
-    /// <param name="environment">Окружение: нужно для относительного пути.</param>
+    /// <param name="options">Настройки сервера.</param>
+    /// <param name="contentRootPath">Корень приложения для относительного пути.</param>
     /// <exception cref="InvalidOperationException">
     /// Каталог задан, но пароль пуст или файл сертификата повреждён.
     /// </exception>
     public static OpenIddictCertificates? LoadOrCreate(
-        IConfiguration configuration,
-        IHostEnvironment environment)
+        OpenIddictServerOptions options,
+        string contentRootPath)
     {
-        ArgumentNullException.ThrowIfNull(configuration);
-        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentRootPath);
 
-        var configuredDirectory = configuration["OpenIddict:Certificates:Directory"];
-        if (string.IsNullOrWhiteSpace(configuredDirectory))
+        if (string.IsNullOrWhiteSpace(options.CertificatesDirectory))
         {
             return null;
         }
 
-        var password = configuration["OpenIddict:Certificates:Password"];
-        if (string.IsNullOrWhiteSpace(password))
+        if (string.IsNullOrWhiteSpace(options.CertificatesPassword))
         {
             throw new InvalidOperationException(
                 "Задан OpenIddict:Certificates:Directory, но не задан OpenIddict:Certificates:Password.");
         }
 
-        var directory = Path.IsPathRooted(configuredDirectory)
-            ? configuredDirectory
-            : Path.Combine(environment.ContentRootPath, configuredDirectory);
+        var directory = Path.IsPathRooted(options.CertificatesDirectory)
+            ? options.CertificatesDirectory
+            : Path.Combine(contentRootPath, options.CertificatesDirectory);
 
         Directory.CreateDirectory(directory);
 
-        // Каталог с закрытыми ключами не должен быть доступен другим пользователям.
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(
@@ -83,14 +75,14 @@ internal static class OpenIddictCertificateLoader
 
         var signing = LoadOrCreate(
             Path.Combine(directory, SigningFileName),
-            "DevHome.Identity OpenIddict signing",
-            password,
+            "OpenIddict signing",
+            options.CertificatesPassword,
             X509KeyUsageFlags.DigitalSignature);
 
         var encryption = LoadOrCreate(
             Path.Combine(directory, EncryptionFileName),
-            "DevHome.Identity OpenIddict encryption",
-            password,
+            "OpenIddict encryption",
+            options.CertificatesPassword,
             X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.DataEncipherment);
 
         return new OpenIddictCertificates(signing, encryption);

@@ -1,10 +1,12 @@
 using System.Reflection;
+using Common.Security.OpenIddict.Server;
 using Common.UI;
 using DevHome.Identity.Client.Pages;
 using DevHome.Identity.Components;
 using DevHome.Identity.Components.Account;
 using DevHome.Identity.Data;
 using DevHome.Identity.DataContext;
+using DevHome.Identity.DataContext.Context;
 using DevHome.Identity.DataContext.Models;
 using DevHome.Identity.OpenIddict;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -66,11 +68,22 @@ if (!string.IsNullOrWhiteSpace(dataProtectionPath))
 }
 
 // DevHome.Identity выступает OAuth 2.0/OpenID Connect-провайдером для остальных приложений DevHome.
-builder.Services.AddDevHomeOpenIddict(builder.Configuration, builder.Environment);
+// Конфигурация OpenIddict и подсистема устройств/сеансов вынесены в библиотеку.
+builder.Services.AddOpenIddictSecurityServer<DBContext>(
+    builder.Configuration,
+    builder.Environment,
+    options =>
+    {
+        foreach (var scope in DevHomeScopes.User)
+        {
+            options.AdditionalScopes.Add(scope);
+        }
+    });
 
 builder.Services.AddSingleton<IEmailSender<ApplicationUser>, IdentityNoOpEmailSender>();
 builder.Services.AddSingleton<DatabaseReadiness>();
 builder.Services.AddHostedService<DatabaseInitializer>();
+builder.Services.AddHostedService<SecurityCleanupService>();
 
 var app = builder.Build();
 

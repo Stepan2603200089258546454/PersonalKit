@@ -1,4 +1,4 @@
-﻿@page "/admin/clients/new"
+@page "/admin/clients/new"
 @page "/admin/clients/{Id}"
 @attribute [Authorize(Roles = AdminRoles.Administrator)]
 @attribute [MenuItem("Клиент", Section = AdminNavigation.Section, Roles = AdminRoles.Administrator, Hidden = true)]
@@ -42,6 +42,21 @@ else
     {
         <div class="alert @(isError ? "alert-danger" : "alert-success")" role="alert">@message</div>
     }
+
+    <div class="alert alert-info" role="status">
+        <div class="fw-semibold mb-1">Что важно не сломать</div>
+        <p class="mb-1 small">
+            <strong>Client ID</strong> — логин приложения. Если его изменить, работающий клиент
+            перестанет входить, пока вы не обновите его настройки. <strong>Адреса возврата</strong>
+            должны совпадать с приложением символ в символ. <strong>Секрет</strong> нужен только
+            конфиденциальным клиентам; публичным (браузер, MAUI, WPF, CLI) он не выдаётся.
+        </p>
+        <p class="mb-0 small">
+            <strong>Разрешения</strong> — конечные точки и сценарии. Не добавляйте
+            <code>client_credentials</code> клиенту, который входит пользователем: это разные
+            модели доступа. После изменения клиента старые токены могут перестать обновляться.
+        </p>
+    </div>
 
     <EditForm Model="model" OnValidSubmit="SaveAsync" FormName="client">
         <DataAnnotationsValidator />

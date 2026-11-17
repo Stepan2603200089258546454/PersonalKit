@@ -1,6 +1,6 @@
-﻿@page "/admin/clients"
+@page "/admin/clients"
 @attribute [Authorize(Roles = AdminRoles.Administrator)]
-@attribute [MenuItem("Клиенты", Description = "Клиентские приложения OpenIddict", Section = AdminNavigation.Section, Icon = "bi bi-window-stack", Roles = AdminRoles.Administrator, Order = 620)]
+@attribute [MenuItem("Клиенты", Description = "Клиентские приложения OpenIddict", Section = AdminNavigation.Section, Icon = "bi bi-window-stack", Roles = AdminRoles.Administrator, Order = 630)]
 @rendermode InteractiveServer
 @layout DevHome.Identity.Components.Admin.Shared.AdminLayout
 
@@ -19,6 +19,21 @@
     <a class="btn btn-primary" href="@AdminNavigation.NewClient">
         <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Создать клиента
     </a>
+</div>
+
+<div class="alert alert-info" role="status">
+    <div class="fw-semibold mb-1">Как читать карточку клиента</div>
+    <p class="mb-1 small">
+        <strong>Публичный</strong> клиент не может хранить секрет: это браузер, MAUI, WPF или CLI.
+        Его защищают PKCE и точный адрес возврата. <strong>Конфиденциальный</strong> клиент работает
+        на сервере и дополнительно проверяется по секрету.
+    </p>
+    <p class="mb-0 small">
+        <strong>Адреса возврата</strong> должны совпадать символ в символ, иначе Identity отклонит
+        запрос. <strong>Сценарии</strong> — способы получения токена (код, refresh, устройство,
+        client_credentials). <strong>Области</strong> — к каким данным получит доступ приложение.
+        Меняйте настройки только если понимаете, какой клиент их использует.
+    </p>
 </div>
 
 @if (loadError is not null)

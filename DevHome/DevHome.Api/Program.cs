@@ -1,8 +1,7 @@
 using System.Reflection;
 using System.Security.Claims;
+using Common.Security.OpenIddict.Client.Web;
 using OpenIddict.Abstractions;
-using OpenIddict.Validation;
-using OpenIddict.Validation.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 // Шаблон API: публичные методы открыты, приватные проверяют access-токен
@@ -10,15 +9,17 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 // и не хранит ключи подписи, поэтому его можно запускать отдельно.
 var builder = WebApplication.CreateBuilder(args);
 
-var issuer = builder.Configuration["OpenIddict:Issuer"] ?? "http://localhost:5201/";
-var clientId = builder.Configuration["OpenIddict:Validation:ClientId"] ?? "devhome-api";
-var clientSecret = builder.Configuration["OpenIddict:Validation:ClientSecret"]
-    ?? "devhome-api-development-secret";
-
-builder.Services.AddAuthentication(options =>
+var validationOptions = new OpenIddictApiValidationOptions
 {
-    options.DefaultScheme = OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme;
-});
+    Issuer = builder.Configuration["OpenIddict:Issuer"] ?? "http://localhost:5201/",
+    ClientId = builder.Configuration["OpenIddict:Validation:ClientId"] ?? "devhome-api",
+    ClientSecret = builder.Configuration["OpenIddict:Validation:ClientSecret"]
+        ?? "devhome-api-development-secret"
+};
+
+// Проверка токенов вынесена в библиотеку: API не знает ключей подписи,
+// а спрашивает Identity, действителен ли предъявленный токен.
+builder.Services.AddOpenIddictApiValidation(validationOptions);
 
 builder.Services.AddAuthorization(options =>
 {
@@ -26,26 +27,6 @@ builder.Services.AddAuthorization(options =>
     // а не имя роли из cookie: API не использует cookie.
     options.AddPolicy("Admin", policy => policy.RequireClaim(Claims.Role, "Admin"));
 });
-
-builder.Services.AddOpenIddict()
-    .AddValidation(options =>
-    {
-        // Issuer должен совпадать с OpenIddict:Issuer в DevHome.Identity.
-        options.SetIssuer(new Uri(issuer));
-
-        // API проверяет токен не подписью, а запросом к /connect/introspect.
-        // Клиент devhome-api создаётся сидером Identity и имеет только
-        // разрешение на introspection.
-        options.UseIntrospection()
-            .SetClientId(clientId)
-            .SetClientSecret(clientSecret);
-
-        // Интеграция introspection с HttpClient: без неё OpenIddict
-        // не знает, чем отправлять запрос в /connect/introspect.
-        options.UseSystemNetHttp();
-
-        options.UseAspNetCore();
-    });
 
 var app = builder.Build();
 

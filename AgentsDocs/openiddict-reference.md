@@ -1,17 +1,21 @@
 # OpenIddict в DevHome.Identity: что за что отвечает
 
 Справочник по настройкам и функциям OpenIddict, подключённым в `DevHome.Identity`.
-Код: `DevHome.Identity/OpenIddict/*`, `Controllers/AuthorizationController.cs`, `Controllers/UserInfoController.cs`.
+Конфигурация и безопасность вынесены в библиотеку `Common.Security.OpenIddict.Server`
+(`AddOpenIddictSecurityServer`), клиентская часть — в `Common.Security.OpenIddict.Client`.
+Код приложения: `DevHome.Identity/OpenIddict/*`, `Controllers/AuthorizationController.cs`,
+`Controllers/UserInfoController.cs`.
 Сценарии входа: [devhome-oauth.md](devhome-oauth.md).
 Админ-панель и личный кабинет: [identity-administration.md](identity-administration.md).
+Устройства и сеансы: [security-sessions.md](security-sessions.md).
 
 ## 1. Три части OpenIddict
 
 | Часть | Где подключается | За что отвечает |
 |---|---|---|
-| `AddCore` | `OpenIddictConfiguration` | Хранилище клиентов, областей, разрешений и токенов в PostgreSQL (`DBContext`, `UseEntityFrameworkCore`). |
-| `AddServer` | `OpenIddictConfiguration` | Выдача кодов и токенов, проверка клиентов, подпись и шифрование токенов. |
-| `AddValidation` | `OpenIddictConfiguration` | Проверка access-токена на защищённых конечных точках самого Identity (`/connect/userinfo`). `UseLocalServer` — проверка по локальным ключам, без сетевого запроса к себе. |
+| `AddCore` | `OpenIddictServerExtensions` | Хранилище клиентов, областей, разрешений и токенов в PostgreSQL (`TContext`, `UseEntityFrameworkCore`). |
+| `AddServer` | `OpenIddictServerExtensions` | Выдача кодов и токенов, проверка клиентов, подпись и шифрование токенов. |
+| `AddValidation` | `OpenIddictServerExtensions` | Проверка access-токена на защищённых конечных точках самого Identity (`/connect/userinfo`). `UseLocalServer` — проверка по локальным ключам, без сетевого запроса к себе. |
 
 ## 2. Конечные точки
 
@@ -20,6 +24,7 @@
 | `SetAuthorizationEndpointUris` | `/connect/authorize` | Начало входа: проверка входа пользователя, выдача кода авторизации. | `AuthorizationController.Authorize` |
 | `SetTokenEndpointUris` | `/connect/token` | Обмен кода, refresh-токена, кода устройства или данных сервиса на токены. | OpenIddict (+ свой обработчик client credentials) |
 | `SetUserInfoEndpointUris` | `/connect/userinfo` | Профиль пользователя по access-токену. | `UserInfoController` |
+| `SetIntrospectionEndpointUris` | `/connect/introspect` | Проверка токена клиентом API без ключей подписи. | OpenIddict |
 | `SetEndSessionEndpointUris` | `/connect/logout` | Выход: закрытие сеансов Identity и клиента. | `AuthorizationController.Logout` |
 | `SetDeviceAuthorizationEndpointUris` | `/connect/deviceauthorization` | Выдача кода устройства для CLI. | OpenIddict |
 | `SetEndUserVerificationEndpointUris` | `/connect/verify` | Страница, где пользователь вводит и подтверждает код устройства. | `AuthorizationController.Verify` |
@@ -118,7 +123,8 @@
 
 ## 10. Свой обработчик client credentials
 
-`ClientCredentialsHandler` — единственное место, где OpenIddict расширяется кодом.
+`ClientCredentialsHandler` живёт в `Common.Security.OpenIddict.Server` — это единственное место,
+где OpenIddict расширяется кодом.
 
 | Элемент | Значение | Почему |
 |---|---|---|
@@ -153,7 +159,13 @@ Identity приватные методы возвращают `401`.
 | `name` | имя пользователя | да | да |
 | `email` | адрес почты | да | да |
 | `role` | роли Identity | да | да |
+| `sid` | идентификатор сеанса (`UserSession.Id`) | да | да |
 | прочие | — | да | нет |
+
+`sid` создаётся библиотекой `Common.Security.OpenIddict.Server` при входе, добавляется
+в cookie Identity и в токены. По нему Identity проверяет, что сеанс ещё действует,
+а в будущем можно реализовать back-channel logout. Подробнее —
+[security-sessions.md](security-sessions.md).
 
 `AccessToken` читает API, `IdentityToken` читает клиент. Пользовательские данные попадают в оба токена, чтобы клиенту не требовался лишний запрос в `/connect/userinfo`.
 
@@ -169,6 +181,10 @@ Identity приватные методы возвращают `401`.
 | `OpenIddict:Seed:RefreshClients` | Обновлять клиентов и область при старте (нужно в Docker при смене адреса). |
 | `OpenIddict:Certificates:Directory`, `Password` | Постоянные PFX-сертификаты OpenIddict вместо временных ключей. |
 | `OpenIddict:AllowHttp` | Разрешить HTTP-транспорт (домашняя сеть, Docker). |
+| `OpenIddict:AccessTokenLifetime`, `RefreshTokenLifetime`, `DeviceCodeLifetime` | Время жизни токенов в формате `чч:мм:сс` или `д.чч:мм:сс`. |
+| `OpenIddict:EnableClientCredentialsFlow` | Включать сценарий «сервис-сервис». |
+| `OpenIddict:DisableAccessTokenEncryption` | Оставлять access-токен читаемым JWT. |
+| `Security:Sessions:*` | Cookie устройства, срок сеанса, хранение журнала, интервал активности. |
 | `Identity:Admin:Email`, `Identity:Admin:Password` | Администратор; пароль используется только при создании в пустой базе. |
 
 ## 14. Что упрощено в Development и что менять для промышленной среды

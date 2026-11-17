@@ -1,4 +1,4 @@
-﻿@page "/admin/users/new"
+@page "/admin/users/new"
 @page "/admin/users/{Id}"
 @attribute [Authorize(Roles = AdminRoles.Administrator)]
 @attribute [MenuItem("Пользователь", Section = AdminNavigation.Section, Roles = AdminRoles.Administrator, Hidden = true)]
@@ -6,6 +6,7 @@
 @layout DevHome.Identity.Components.Admin.Shared.AdminLayout
 
 @using System.Security.Claims
+@using Common.Security.OpenIddict.Server.Security
 @using Microsoft.AspNetCore.Components.Authorization
 @using DevHome.Identity.Components.Account
 
@@ -14,6 +15,7 @@
 @inject IDbContextFactory<DBContext> DbFactory
 @inject IOpenIddictTokenManager TokenManager
 @inject IOpenIddictAuthorizationManager AuthorizationManager
+@inject IUserSecurityService SecurityService
 @inject NavigationManager Navigation
 @inject ILogger<UserEdit> Logger
 
@@ -268,6 +270,115 @@ else
                 </div>
 
                 <div class="card mb-4">
+                    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <span class="fw-semibold">Устройства и сеансы</span>
+                        <span class="badge text-bg-secondary">@DescribePolicy(devicePolicy)</span>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-body-secondary">
+                            Сеанс — это один вход. Он хранит устройство, браузер, IP-адрес, время
+                            и приложение. Один и тот же браузер на одном компьютере считается
+                            одним устройством. Завершение сеанса отзывает его токены; блокировка
+                            устройства запрещает будущие входы с него.
+                        </p>
+
+                        <label class="form-label small text-body-secondary" for="user-device-policy">
+                            Политика входа с устройств
+                        </label>
+                        <div class="input-group input-group-sm mb-3">
+                            <select id="user-device-policy" class="form-select" @bind="devicePolicy">
+                                <option value="@DeviceLoginPolicy.MultipleDevices">Несколько устройств</option>
+                                <option value="@DeviceLoginPolicy.SingleDeviceNewestWins">Одно устройство: новый вход побеждает</option>
+                                <option value="@DeviceLoginPolicy.SingleDeviceRequiresOldSessionEnd">Одно устройство: завершить старый сеанс</option>
+                            </select>
+                            <button type="button" class="btn btn-outline-primary" disabled="@isBusy" @onclick="SavePolicyAsync">
+                                Сохранить
+                            </button>
+                        </div>
+                        <div class="form-text mb-3">
+                            «Новый вход побеждает» завершает старые сеансы автоматически.
+                            «Завершить старый сеанс» блокирует новый вход, пока старый сеанс
+                            не будет завершён пользователем или администратором.
+                        </div>
+
+                        <div class="fw-semibold small mb-2">Действующие сеансы: @activeSessions.Count</div>
+                        @if (activeSessions.Count == 0)
+                        {
+                            <p class="small text-body-secondary">Действующих сеансов нет.</p>
+                        }
+                        else
+                        {
+                            <ul class="list-group list-group-flush mb-3">
+                                @foreach (var session in activeSessions)
+                                {
+                                    <li class="list-group-item px-0">
+                                        <div class="d-flex flex-wrap justify-content-between gap-2">
+                                            <div class="min-w-0">
+                                                <div class="fw-semibold text-truncate">@session.DeviceName</div>
+                                                <div class="small text-body-secondary text-truncate">
+                                                    @(session.ApplicationName ?? session.ClientId)
+                                                    · @(session.IpAddress ?? "IP неизвестен")
+                                                    · @FormatDate(session.LastSeenAt)
+                                                </div>
+                                            </div>
+                                            <button type="button" class="btn btn-sm btn-outline-danger align-self-center"
+                                                    disabled="@isBusy" @onclick="() => RevokeSessionAsync(session)">
+                                                Завершить
+                                            </button>
+                                        </div>
+                                    </li>
+                                }
+                            </ul>
+                        }
+
+                        <div class="fw-semibold small mb-2">Устройства: @devices.Count</div>
+                        @if (devices.Count == 0)
+                        {
+                            <p class="small text-body-secondary mb-0">Устройства появятся после входа.</p>
+                        }
+                        else
+                        {
+                            <ul class="list-group list-group-flush">
+                                @foreach (var device in devices)
+                                {
+                                    <li class="list-group-item px-0">
+                                        <div class="d-flex flex-wrap justify-content-between gap-2">
+                                            <div class="min-w-0">
+                                                <div class="fw-semibold text-truncate">
+                                                    @device.DisplayName
+                                                    @if (device.IsBlocked)
+                                                    {
+                                                        <span class="badge text-bg-danger ms-1">заблокировано</span>
+                                                    }
+                                                </div>
+                                                <div class="small text-body-secondary text-truncate">
+                                                    @(device.LastIpAddress ?? "IP неизвестен")
+                                                    · @FormatDate(device.LastSeenAt)
+                                                </div>
+                                            </div>
+                                            @if (device.IsBlocked)
+                                            {
+                                                <button type="button" class="btn btn-sm btn-outline-success"
+                                                        disabled="@isBusy" @onclick="() => UnblockDeviceAsync(device.Id)">
+                                                    Разблокировать
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="btn btn-sm btn-outline-warning"
+                                                        disabled="@isBusy" @onclick="() => BlockDeviceAsync(device.Id)">
+                                                    Заблокировать
+                                                </button>
+                                            }
+                                        </div>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+
+                <div class="card mb-4">
                     <div class="card-header fw-semibold">Задать новый пароль</div>
                     <div class="card-body">
                         <EditForm Model="password" OnValidSubmit="SetPasswordAsync" FormName="set-password">
@@ -367,6 +478,9 @@ else
     private int recoveryCodesLeft;
     private int authorizationCount;
     private int tokenCount;
+    private DeviceLoginPolicy devicePolicy = DeviceLoginPolicy.MultipleDevices;
+    private List<SessionSummary> activeSessions = [];
+    private List<DeviceSummary> devices = [];
     private string? message;
     private bool isError;
 
@@ -430,6 +544,11 @@ else
             .CountAsync(authorization => authorization.Subject == user.Id);
         tokenCount = await db.Set<OpenIddictEntityFrameworkCoreToken>()
             .CountAsync(token => token.Subject == user.Id && token.Status == Statuses.Valid);
+
+        var securitySettings = await SecurityService.GetSettingsAsync(user.Id);
+        devicePolicy = securitySettings.DevicePolicy;
+        activeSessions = [.. await SecurityService.GetActiveSessionsAsync(user.Id)];
+        devices = [.. await SecurityService.GetDevicesAsync(user.Id)];
     }
 
     private async Task LoadRolesAsync()
@@ -692,6 +811,132 @@ else
         }
     }
 
+    private async Task SavePolicyAsync()
+    {
+        if (user is null)
+        {
+            return;
+        }
+
+        var actorId = await GetCurrentUserIdAsync();
+        if (string.IsNullOrWhiteSpace(actorId))
+        {
+            return;
+        }
+
+        isBusy = true;
+        message = null;
+
+        try
+        {
+            await SecurityService.SetPolicyAsync(user.Id, devicePolicy, actorId);
+            var settings = await SecurityService.GetSettingsAsync(user.Id);
+            devicePolicy = settings.DevicePolicy;
+            activeSessions = [.. await SecurityService.GetActiveSessionsAsync(user.Id)];
+            devices = [.. await SecurityService.GetDevicesAsync(user.Id)];
+            SetSuccess("Политика входа с устройств сохранена.");
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось сохранить политику устройств пользователя {UserId}.", user.Id);
+            SetError("Не удалось сохранить политику: " + exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task RevokeSessionAsync(SessionSummary session)
+    {
+        var actorId = await GetCurrentUserIdAsync();
+        if (string.IsNullOrWhiteSpace(actorId))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await SecurityService.RevokeSessionAsync(
+                session.UserId,
+                session.Id,
+                actorId,
+                "Сеанс завершён администратором.");
+
+            activeSessions = [.. await SecurityService.GetActiveSessionsAsync(session.UserId)];
+            devices = [.. await SecurityService.GetDevicesAsync(session.UserId)];
+            SetSuccess("Сеанс завершён, токены связанных приложений отозваны.");
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось завершить сеанс {SessionId}.", session.Id);
+            SetError("Не удалось завершить сеанс: " + exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task BlockDeviceAsync(Guid deviceId)
+    {
+        var actorId = await GetCurrentUserIdAsync();
+        if (user is null || string.IsNullOrWhiteSpace(actorId))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await SecurityService.BlockDeviceAsync(
+                user.Id,
+                deviceId,
+                actorId,
+                "Устройство заблокировано администратором.");
+
+            activeSessions = [.. await SecurityService.GetActiveSessionsAsync(user.Id)];
+            devices = [.. await SecurityService.GetDevicesAsync(user.Id)];
+            SetSuccess("Устройство заблокировано, все его сеансы завершены.");
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось заблокировать устройство {DeviceId}.", deviceId);
+            SetError("Не удалось заблокировать устройство: " + exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task UnblockDeviceAsync(Guid deviceId)
+    {
+        var actorId = await GetCurrentUserIdAsync();
+        if (user is null || string.IsNullOrWhiteSpace(actorId))
+        {
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            await SecurityService.UnblockDeviceAsync(user.Id, deviceId, actorId);
+            devices = [.. await SecurityService.GetDevicesAsync(user.Id)];
+            SetSuccess("Устройство разблокировано. Старые сеансы не восстановлены.");
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Не удалось разблокировать устройство {DeviceId}.", deviceId);
+            SetError("Не удалось разблокировать устройство: " + exception.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
     private async Task EndSessionsAsync()
     {
         if (user is null)
@@ -703,13 +948,17 @@ else
         try
         {
             await UserManager.UpdateSecurityStampAsync(user);
-            await TokenManager.RevokeBySubjectAsync(user.Id);
-            await AuthorizationManager.RevokeBySubjectAsync(user.Id);
+            var actorId = await GetCurrentUserIdAsync();
+            await SecurityService.RevokeAllSessionsAsync(
+                user.Id,
+                actorId ?? user.Id,
+                "Все сеансы завершены администратором.");
 
             await using var db = await DbFactory.CreateDbContextAsync();
             authorizationCount = await db.Set<OpenIddictEntityFrameworkCoreAuthorization>()
                 .CountAsync(authorization => authorization.Subject == user.Id && authorization.Status == Statuses.Valid);
             tokenCount = 0;
+            activeSessions = [];
 
             SetSuccess("Все сеансы завершены, токены и авторизации отозваны.");
         }
@@ -765,6 +1014,8 @@ else
                 return;
             }
 
+            await SecurityService.DeleteUserDataAsync(user.Id);
+
             Logger.LogInformation("Администратор удалил пользователя {Email}.", profile.Email);
             Navigation.NavigateTo(AdminNavigation.Users);
         }
@@ -781,6 +1032,28 @@ else
             Navigation.Refresh();
         }
     }
+
+    private async Task<string?> GetCurrentUserIdAsync()
+    {
+        if (AuthenticationStateTask is null)
+        {
+            return null;
+        }
+
+        var state = await AuthenticationStateTask;
+        return state.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    }
+
+    private static string DescribePolicy(DeviceLoginPolicy value) => value switch
+    {
+        DeviceLoginPolicy.MultipleDevices => "несколько устройств",
+        DeviceLoginPolicy.SingleDeviceNewestWins => "одно устройство: новый вход побеждает",
+        DeviceLoginPolicy.SingleDeviceRequiresOldSessionEnd => "одно устройство: завершить старый сеанс",
+        _ => value.ToString()
+    };
+
+    private static string FormatDate(DateTimeOffset value) =>
+        value.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
 
     private async Task<bool> IsCurrentUserAsync(string userId)
     {
